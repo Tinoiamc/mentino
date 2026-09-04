@@ -1,0 +1,54 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "sessions": {
+      "$code": {
+        ".read": true,
+        ".write": "auth != null && (!data.exists() || data.child('owner').val() === auth.uid)"
+      }
+    },
+    "mine": {
+      "$uid": {
+        ".read": "auth != null && $uid === auth.uid",
+        ".write": "auth != null && $uid === auth.uid"
+      }
+    },
+    "tally": {
+      "$code": {
+        ".read": true,
+        ".write": "auth != null && root.child('sessions').child($code).child('owner').val() === auth.uid"
+      }
+    },
+    "responses": {
+      "$code": {
+        ".read": "auth != null && root.child('sessions').child($code).child('owner').val() === auth.uid",
+        ".write": "auth != null && root.child('sessions').child($code).child('owner').val() === auth.uid",
+        "$item": {
+          "$pid": {
+            ".write": "root.child('sessions').child($code).child('open').val() === true && root.child('sessions').child($code).child('items').child($item).exists() && $pid.length >= 8 && $pid.length <= 40",
+            ".validate": "newData.hasChild('ts')",
+            "ts": {
+              ".validate": "newData.isNumber()"
+            },
+            "words": {
+              "$i": {
+                ".validate": "newData.isString() && newData.val().length <= 40"
+              }
+            },
+            "choices": {
+              "$i": {
+                ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() < 20"
+              }
+            },
+            "labels": {
+              "$i": {
+                ".validate": "newData.isString() && newData.val().length <= 90"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
