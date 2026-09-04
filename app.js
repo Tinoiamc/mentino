@@ -185,6 +185,11 @@ const mask = w => '*'.repeat(Math.max(3, String(w).replace(/\s/g, '').length));
 const CFG = window.FIREBASE_CONFIG || {};
 const NAME = window.APP_NAME || 'Sala';
 let db = null, uid = null;
+/* ¿Cargó el SDK de Firebase? El público no lo necesita (la pantalla de
+   participante habla con la base por HTTP suelto), pero crear y manejar
+   sesiones sí. Algunos navegadores embebidos —el de WhatsApp, Teams o
+   Outlook— y algunas redes corporativas no bajan los scripts de gstatic. */
+let sdkOk = true;
 const listeners = [];   // { ref, event, cb }
 
 function detachAll() {
@@ -265,12 +270,18 @@ function authFail(e) {
 
 function boot() {
   if (configMissing()) return renderSetup();
+  DBU = String(CFG.databaseURL || '').replace(/\/+$/, '');
+  if (typeof firebase === 'undefined' || !firebase.initializeApp) {
+    // Sin SDK: el público igual puede entrar con su código.
+    sdkOk = false;
+    return route();
+  }
   try {
     firebase.initializeApp(CFG);
   } catch (e) {
-    return renderFatal('No se pudo iniciar Firebase', e.message);
+    sdkOk = false;
+    return route();
   }
-  DBU = String(CFG.databaseURL || '').replace(/\/+$/, '');
   route();
 }
 
@@ -378,8 +389,9 @@ function route() {
   document.body.classList.remove('present');
   const raw = location.hash.replace(/^#\/?/, '').split('?')[0];
   const parts = raw.split('/').filter(Boolean);
-  if (!parts.length) return renderHome();
+  if (!parts.length) return sdkOk ? renderHome() : renderCodeOnly();
   if (parts[0] === 'host' && parts[1]) {
+    if (!sdkOk) return renderCodeOnly();
     const c = parts[1].toUpperCase();
     APP().innerHTML = '<div class="setup"><p class="muted">Abriendo el panel…</p></div>';
     return ensureAuth().then(() => renderHost(c)).catch(authFail);
@@ -421,6 +433,33 @@ function renderFatal(title, msg) {
     <p class="muted">${esc(msg)}</p>
     <p><a class="btn" href="#">Volver al inicio</a></p>
   </div>`;
+}
+
+/* Pantalla para navegadores que no pudieron cargar el SDK. Participar sigue
+   siendo posible: solo hace falta el código de seis caracteres. */
+function renderCodeOnly() {
+  APP().innerHTML = topbar('', '') + `
+  <div class="setup">
+    <p class="eyebrow">Este navegador no cargó todo</p>
+    <h1 style="font-family:var(--display);font-size:32px;letter-spacing:-.03em;margin:8px 0 14px">
+      Entrá con tu código</h1>
+    <p class="muted">Pasa seguido cuando el link se abre dentro de otra aplicación (WhatsApp, Teams,
+      Outlook) o en una red que bloquea algunos servidores de Google. Para <strong>participar</strong>
+      no hace falta nada de eso: escribí abajo el código de seis caracteres que muestra quien presenta.</p>
+    <div class="split" style="margin-top:16px">
+      <input class="input" id="jc2" placeholder="ABC123" maxlength="6"
+             style="font-family:var(--mono);text-transform:uppercase;letter-spacing:.12em">
+      <button class="btn btn-primary" id="jb2">Entrar</button>
+    </div>
+    <p class="muted" style="margin-top:18px">Para crear o manejar una sesión, abrí este link en Chrome
+      o Safari: en WhatsApp, los tres puntos de arriba a la derecha → “Abrir en el navegador”.</p>
+  </div>`;
+  const join = () => {
+    const c = (document.getElementById('jc2').value || '').trim().toUpperCase();
+    if (c.length === 6) location.hash = '#/' + c; else toast('El código tiene 6 caracteres');
+  };
+  document.getElementById('jb2').onclick = join;
+  document.getElementById('jc2').addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
 }
 
 function topbar(titleHtml, actionsHtml) {

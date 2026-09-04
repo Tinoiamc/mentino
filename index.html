@@ -20,6 +20,18 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+/* Si gstatic.com no respondió (red corporativa, navegador embebido de otra
+   app), buscamos el mismo SDK en otro CDN antes de arrancar. Si tampoco
+   aparece, app.js igual deja participar con el código: la pantalla del
+   público habla con la base por HTTP suelto, sin SDK. */
+if (typeof firebase === 'undefined') {
+  document.write(
+    '<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-app-compat.js"><\/script>' +
+    '<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-auth-compat.js"><\/script>' +
+    '<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-database-compat.js"><\/script>');
+}
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="config.js"></script>
 <script src="app.js"></script>
