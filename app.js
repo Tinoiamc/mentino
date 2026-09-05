@@ -1,5 +1,5 @@
 /* =====================================================================
-   Sala — nubes de palabras y encuestas en vivo
+   Encuesteitor — nubes de palabras y encuestas en vivo
    Frontend estático (GitHub Pages) + Firebase Realtime Database.
    Un solo archivo, sin build. Comentarios en español.
    ===================================================================== */
@@ -61,6 +61,8 @@ async function restPut(path, body) {
 
 const timers = [];
 function clearTimers() { while (timers.length) clearInterval(timers.pop()); }
+const waits = [];
+function clearWaits() { while (waits.length) clearTimeout(waits.pop()); }
 
 /* localStorage con respaldo en memoria por si el navegador lo bloquea */
 const memStore = {};
@@ -183,7 +185,7 @@ const mask = w => '*'.repeat(Math.max(3, String(w).replace(/\s/g, '').length));
    3. Firebase
    --------------------------------------------------------------- */
 const CFG = window.FIREBASE_CONFIG || {};
-const NAME = window.APP_NAME || 'Sala';
+const NAME = window.APP_NAME || 'Encuesteitor';
 let db = null, uid = null;
 /* ¿Cargó el SDK de Firebase? El público no lo necesita (la pantalla de
    participante habla con la base por HTTP suelto), pero crear y manejar
@@ -191,13 +193,16 @@ let db = null, uid = null;
    Outlook— y algunas redes corporativas no bajan los scripts de gstatic. */
 let sdkOk = true;
 const listeners = [];   // { ref, event, cb }
+let navKeys = null;     // atajos de teclado del panel del anfitrión
 
 function detachAll() {
   clearTimers();
+  clearWaits();
   while (listeners.length) {
     const l = listeners.pop();
     try { l.ref.off(l.event, l.cb); } catch (e) {}
   }
+  if (navKeys) { document.removeEventListener('keydown', navKeys); navKeys = null; }
 }
 function on(ref, event, cb, err) {
   const bound = ref.on(event, cb, err || (e => console.warn('DB:', e && e.code)));
@@ -311,12 +316,7 @@ function itemsSorted(session) {
 }
 
 async function createSession(title) {
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code = randomCode(6);
-    const snap = await db.ref('sessions/' + code).get();
-    if (!snap.exists()) break;
-  }
+  const code = await window.ENC.freeCode(6);
   const id = 'q' + Date.now().toString(36);
   const items = {}; items[id] = newItem('cloud', 1);
   const name = title && title.trim() ? title.trim() : 'Sesión sin título';
@@ -371,6 +371,28 @@ async function duplicateSession(from) {
   return code;
 }
 
+/* Deja constancia de que una pregunta se reinició. Los celulares que ya
+   habían respondido leen este valor y vuelven a habilitar el formulario:
+   sin esto quedarían con el "ya respondiste" guardado en el navegador.
+   Si las reglas de la base rechazaran el campo, el borrado igual se hizo. */
+function markReset(code, itemIds) {
+  const up = {};
+  itemIds.forEach(id => { up['items/' + id + '/resetAt'] = firebase.database.ServerValue.TIMESTAMP; });
+  return db.ref('sessions/' + code).update(up).then(() => true).catch(e => {
+    console.warn('No se pudo marcar el reinicio:', e && e.code);
+    return false;
+  });
+}
+
+/* Borra las respuestas de toda la sesión y la deja lista para volver a usarla
+   con otro público, conservando las preguntas. */
+function resetSession(code, itemIds) {
+  return Promise.all([
+    db.ref('responses/' + code).remove(),
+    db.ref('tally/' + code).remove()
+  ]).then(() => markReset(code, itemIds));
+}
+
 /* Borra la sesión completa: preguntas, respuestas, resumen y la entrada de la lista. */
 function deleteSession(code) {
   return Promise.all([
@@ -390,6 +412,26 @@ function route() {
   const raw = location.hash.replace(/^#\/?/, '').split('?')[0];
   const parts = raw.split('/').filter(Boolean);
   if (!parts.length) return sdkOk ? renderHome() : renderCodeOnly();
+
+  /* Modo competitivo: vive en el mismo sitio y en la misma dirección.
+     #/comp            portada del juego
+     #/comp/host/CODE  panel del anfitrión
+     #/comp/CODE       pantalla del jugador (el público igual entra por #/CODE) */
+  if (parts[0] === 'comp') {
+    if (!window.QUIZ) return renderFatal('Falta el módulo competitivo',
+      'No se cargó quiz.js. Copialo al lado de index.html y recargá.');
+    if (!parts[1]) {
+      if (!sdkOk) return renderCodeOnly();
+      return window.QUIZ.home();
+    }
+    if (parts[1] === 'host' && parts[2]) {
+      if (!sdkOk) return renderCodeOnly();
+      APP().innerHTML = '<div class="setup"><p class="muted">Abriendo el panel…</p></div>';
+      return ensureAuth().then(() => window.QUIZ.host(parts[2].toUpperCase())).catch(authFail);
+    }
+    return window.QUIZ.play(parts[1].toUpperCase());
+  }
+
   if (parts[0] === 'host' && parts[1]) {
     if (!sdkOk) return renderCodeOnly();
     const c = parts[1].toUpperCase();
@@ -398,6 +440,40 @@ function route() {
   }
   return renderJoin(parts[0].toUpperCase());
 }
+
+/* Servicios que el módulo competitivo toma prestados de acá, para que haya
+   una sola conexión, un solo ruteo y una sola limpieza al cambiar de
+   pantalla. quiz.js no inicializa Firebase ni escucha el hash por su cuenta. */
+window.ENC = {
+  db: () => db,
+  uid: () => uid,
+  dbu: () => DBU,
+  sdkOk: () => sdkOk,
+  on: on,
+  timer: id => { timers.push(id); return id; },
+  wait: id => { waits.push(id); return id; },
+  navKeys: fn => {
+    if (navKeys) document.removeEventListener('keydown', navKeys);
+    navKeys = fn;
+    if (fn) document.addEventListener('keydown', fn);
+  },
+  ensureAuth: ensureAuth,
+  signInGoogle: signInGoogle,
+  dbMsg: dbMsg,
+  randomCode: randomCode,
+  freeCode: async function (n) {
+    // Un código no puede chocar con el de una encuesta ni con el de otra
+    // competencia: el público entra a las dos por la misma dirección.
+    for (let i = 0; i < 8; i++) {
+      const c = randomCode(n || 6);
+      const a = await db.ref('sessions/' + c + '/owner').get();
+      if (a.exists()) continue;
+      const b = await db.ref('quizzes/' + c + '/owner').get();
+      if (!b.exists()) return c;
+    }
+    throw new Error('No pudimos generar un código libre. Probá otra vez.');
+  }
+};
 window.addEventListener('hashchange', route);
 
 /* ---------------------------------------------------------------
@@ -481,7 +557,7 @@ function fmtDate(ms) {
 }
 
 function renderHome() {
-  APP().innerHTML = topbar('', '<span id="acct"></span>') + `
+  APP().innerHTML = topbar('', '<a class="btn btn-sm" href="#/comp">Modo competitivo</a><span id="acct"></span>') + `
   <div class="home">
     <div class="home-hero">
       <p class="eyebrow">Nubes de palabras y encuestas en vivo</p>
@@ -511,6 +587,8 @@ function renderHome() {
                  style="font-family:var(--mono);text-transform:uppercase;letter-spacing:.12em">
           <button class="btn btn-primary" id="jb">Entrar</button>
         </div>
+        <p class="muted" style="margin-top:18px">¿Querés una competencia con puntaje y ranking?
+          <a href="#/comp">Abrí el modo competitivo</a>.</p>
       </div>
     </div>
     <section style="margin-top:38px">
@@ -616,6 +694,31 @@ function renderHost(code) {
   document.getElementById('exitPres').onclick = () => document.body.classList.remove('present');
 
   const sref = db.ref('sessions/' + code);
+
+  /* Atajos de teclado: ← y → cambian de pregunta sin buscar la barra lateral
+     (útil cuando volvés de la presentación y querés activar la siguiente).
+     En modo presentación, la barra espaciadora abre y cierra la votación.
+     No se activan mientras se escribe en un campo. */
+  navKeys = function (e) {
+    const t = e.target;
+    if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+    if (!state.session) return;
+    const list = itemsSorted(state.session);
+    const i = list.findIndex(([id]) => id === state.session.activeItem);
+    if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+      if (i > -1 && i < list.length - 1) { e.preventDefault(); sref.child('activeItem').set(list[i + 1][0]); }
+    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+      if (i > 0) { e.preventDefault(); sref.child('activeItem').set(list[i - 1][0]); }
+    } else if ((e.key === ' ' || e.key === 'Spacebar') && document.body.classList.contains('present')) {
+      e.preventDefault();
+      const abierta = state.session.open !== false;
+      sref.child('open').set(!abierta);
+      toast(abierta ? 'Votación cerrada' : 'Votación abierta');
+    } else if (e.key === 'Escape') {
+      document.body.classList.remove('present');
+    }
+  };
+  document.addEventListener('keydown', navKeys);
 
   on(sref, 'value', snap => {
     if (!snap.exists()) return renderFatal('Esa sesión no existe', 'El código ' + code + ' no corresponde a ninguna sesión activa.');
@@ -759,6 +862,12 @@ function renderHost(code) {
         <p class="muted" style="font-size:12.5px;margin:6px 0 0">Se suman a la lista de groserías que ya trae la aplicación.</p>
       </section>
       <section>
+        <h3>Volver a empezar</h3>
+        <button class="btn btn-sm" id="rst">Borrar todas las respuestas</button>
+        <p class="muted" style="font-size:12.5px;margin:6px 0 0">Las preguntas y el código quedan igual: sirve para
+        usar la misma sesión con otro público.</p>
+      </section>
+      <section>
         <button class="btn btn-sm btn-danger" id="del">Eliminar la sesión</button>
       </section>`;
 
@@ -766,7 +875,7 @@ function renderHost(code) {
     const qbox = document.getElementById('qr');
     qbox.innerHTML = '';
     try {
-      new QRCode(qbox, { text: url, width: 168, height: 168, colorDark: '#12141F', colorLight: '#ffffff',
+      new QRCode(qbox, { text: url, width: 168, height: 168, colorDark: '#0B1A2A', colorLight: '#ffffff',
                          correctLevel: QRCode.CorrectLevel.M });
     } catch (e) { qbox.textContent = 'QR no disponible'; }
 
@@ -796,6 +905,15 @@ function renderHost(code) {
         sref.update(up);
       };
     });
+    document.getElementById('rst').onclick = () => {
+      if (!confirm('Se borran las respuestas de todas las preguntas de esta sesión. Las preguntas quedan como están.')) return;
+      const ids = itemsSorted(state.session).map(([id]) => id);
+      resetSession(code, ids).then(ok => {
+        state.seen = new Set();
+        toast(ok ? 'Sesión en blanco: las preguntas quedaron listas para responder de nuevo'
+                 : 'Respuestas borradas. Quien ya había respondido tendrá que tocar "Cambiar mi respuesta"');
+      });
+    };
     document.getElementById('del').onclick = () => {
       if (!confirm('Se elimina la sesión y todas sus respuestas. Esta acción no se puede deshacer.')) return;
       deleteSession(code).then(() => { location.hash = ''; });
@@ -908,7 +1026,13 @@ function renderHost(code) {
     document.getElementById('eReset').onclick = () => {
       if (!confirm('Se borran todas las respuestas de esta pregunta.')) return;
       db.ref('tally/' + code + '/' + itemId).remove();
-      db.ref('responses/' + code + '/' + itemId).remove().then(() => { state.seen = new Set(); toast('Respuestas borradas'); });
+      db.ref('responses/' + code + '/' + itemId).remove().then(() => {
+        state.seen = new Set();
+        markReset(code, [itemId]).then(ok => {
+          toast(ok ? 'Respuestas borradas: el público puede volver a responder'
+                   : 'Respuestas borradas. Quien ya había respondido tendrá que tocar "Cambiar mi respuesta"');
+        });
+      });
     };
     document.getElementById('eDel').onclick = () => {
       const list = itemsSorted(state.session);
@@ -1046,6 +1170,19 @@ function renderTally(el, tally, seen) {
 function renderJoin(code) {
   const st = { s: null, itemId: null, item: null, answered: false, tally: null, seen: new Set() };
   const pid = participantId();
+
+  /* El "ya respondí" vive en este navegador, junto con la marca de reinicio
+     que tenía la pregunta cuando se envió la respuesta. Si el anfitrión
+     borra las respuestas, esa marca cambia y el formulario se habilita solo,
+     sin pedirle a nadie que borre datos del navegador. */
+  const lockKey = id => 'sala:' + code + ':' + id;
+  const genOf = it => String((it && it.resetAt) || 0);
+  function isAnswered(id, it) {
+    const v = store.get(lockKey(id));
+    if (!v) return false;
+    return (v === '1' ? '0' : v) === genOf(it);   // '1' es el formato viejo
+  }
+
   APP().innerHTML = topbar('', '') + `<div class="join" id="jw"><p class="muted">Cargando…</p></div>`;
 
   load();
@@ -1054,7 +1191,14 @@ function renderJoin(code) {
     let s;
     try { s = await restGet('sessions/' + code); }
     catch (e) { return fail('No pudimos conectarnos. Revisá tu conexión y volvé a intentar.'); }
-    if (!s) return fail('No encontramos ninguna sesión con el código ' + code + '. Revisalo con quien está presentando.');
+    if (!s) {
+      /* Puede ser el código de una competencia: el público entra a las dos
+         por la misma dirección, así que probamos ahí antes de dar error. */
+      let q = null;
+      try { q = await restGet('quizzes/' + code); } catch (e) { q = null; }
+      if (q && window.QUIZ) return window.QUIZ.play(code);
+      return fail('No encontramos nada con el código ' + code + '. Revisalo con quien está presentando.');
+    }
     st.s = s;
     setItem(s.activeItem, (s.items || {})[s.activeItem]);
     poll();
@@ -1067,7 +1211,7 @@ function renderJoin(code) {
 
   function setItem(id, item) {
     st.itemId = id; st.item = item || null; st.tally = null; st.seen = new Set();
-    st.answered = store.get('sala:' + code + ':' + id) === '1';
+    st.answered = isAnswered(id, st.item);
     paint();
     if (canSee()) refreshTally();
   }
@@ -1089,11 +1233,26 @@ function renderJoin(code) {
         if (live.item && live.item !== st.itemId) {
           const it = await restGet('sessions/' + code + '/items/' + live.item);
           setItem(live.item, it);
-        } else if (canSee()) {
-          refreshTally();
+          return;
         }
+        if (st.answered) await checkReset();
+        if (canSee()) refreshTally();
       } catch (e) { /* un pedido perdido no rompe nada: se reintenta al siguiente ciclo */ }
     }, 4000 + Math.floor(Math.random() * 3000)));
+  }
+
+  /* Consulta de pocos bytes, solo para quien ya respondió: si el anfitrión
+     reinició la pregunta, vuelve a mostrar el formulario. */
+  async function checkReset() {
+    try {
+      const rst = await restGet('sessions/' + code + '/items/' + st.itemId + '/resetAt');
+      if (!st.item) return;
+      st.item.resetAt = rst || 0;
+      if (isAnswered(st.itemId, st.item)) return;
+      st.answered = false; st.tally = null; st.seen = new Set();
+      paint();
+      toast('El anfitrión reinició esta pregunta: podés responder de nuevo');
+    } catch (e) { /* si falla, se reintenta en el próximo ciclo */ }
   }
 
   async function refreshTally() {
@@ -1210,7 +1369,7 @@ function renderJoin(code) {
       send.disabled = true; send.textContent = 'Enviando…';
       try {
         await restPut('responses/' + code + '/' + st.itemId + '/' + pid, payload);
-        store.set('sala:' + code + ':' + st.itemId, '1');
+        store.set(lockKey(st.itemId), genOf(st.item));
         st.answered = true;
         toast('Respuesta enviada');
         paint();

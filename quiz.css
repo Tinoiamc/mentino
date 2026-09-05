@@ -1,0 +1,119 @@
+/* =====================================================================
+   Encuesteitor — modo competitivo
+   Se apoya en styles.css (misma paleta y misma tipografía) y agrega solo
+   lo propio del juego: reloj, tarjetas de opción, tabla de posiciones,
+   podio y sala de espera.
+   ===================================================================== */
+
+/* ---------- reloj de la pregunta ---------- */
+.timer{
+  height:10px;border-radius:6px;background:var(--ink-3);overflow:hidden;margin:0 0 20px;
+}
+.timer-fill{
+  height:100%;border-radius:6px;background:var(--grad);
+  transition:width .25s linear;
+}
+.timer-fill.warn{background:linear-gradient(100deg,#F2A33C,#D94F4F)}
+.timer-num{
+  font-family:var(--mono);font-weight:700;font-variant-numeric:tabular-nums;
+  font-size:clamp(30px,4vw,52px);line-height:1;color:var(--spark);
+}
+.timer-num.warn{color:#FFB259}
+.timer-row{display:flex;align-items:baseline;justify-content:space-between;gap:18px;margin-bottom:10px}
+.timer-row .lbl{font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-dark)}
+
+/* ---------- tarjetas de opción ---------- */
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%}
+.tile{
+  border:none;border-radius:14px;padding:20px 18px;color:#fff;cursor:pointer;
+  font-family:var(--display);font-weight:600;font-size:clamp(15px,1.8vw,21px);line-height:1.25;
+  text-align:left;display:flex;align-items:center;gap:13px;min-height:74px;
+  transition:transform .12s ease,filter .12s ease,opacity .2s ease;
+}
+.tile:hover{filter:brightness(1.08)}
+.tile:active{transform:scale(.985)}
+.tile[disabled]{cursor:default}
+.tile .k{
+  width:30px;height:30px;border-radius:9px;background:rgba(255,255,255,.22);flex:none;
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:14px;font-weight:700;
+}
+.tile .cnt{margin-left:auto;font-family:var(--mono);font-size:15px;font-weight:700;opacity:.9;flex:none}
+/* La rampa va de verde a azul, así que las cuatro primeras opciones toman
+   los escalones más separados entre sí; la letra A/B/C/D es la que
+   realmente distingue, el color acompaña. */
+.tile.t0{background:var(--w1)} .tile.t1{background:var(--w3)}
+.tile.t2{background:var(--w5)} .tile.t3{background:var(--w6)}
+.tile.t4{background:var(--w2)} .tile.t5{background:var(--w4)}
+
+/* aviso en la lista de preguntas: falta marcar la opción correcta */
+.badge.warn{background:#FFF1D6;color:#8A5B00}
+.tile.dim{opacity:.28}
+.tile.right{outline:3px solid #fff;outline-offset:3px}
+.tile.picked{box-shadow:0 0 0 3px rgba(255,255,255,.65) inset}
+@media (max-width:640px){ .tiles{grid-template-columns:1fr} }
+
+/* ---------- sala de espera ---------- */
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.chip{
+  background:var(--ink-3);color:#fff;border-radius:999px;padding:6px 13px;font-size:13.5px;
+  font-weight:500;animation:chipin .35s cubic-bezier(.2,1.3,.4,1);
+}
+@keyframes chipin{from{opacity:0;transform:scale(.7)}to{opacity:1;transform:scale(1)}}
+.chip.paper{background:var(--accent-soft);color:var(--accent)}
+.bignum{
+  font-family:var(--mono);font-weight:700;font-variant-numeric:tabular-nums;
+  font-size:clamp(44px,7vw,86px);line-height:1;color:#fff;
+}
+.bignum small{font-family:var(--body);font-size:15px;font-weight:500;color:var(--muted-dark);margin-left:10px}
+
+/* ---------- avance de respuestas ---------- */
+.progress{height:8px;border-radius:5px;background:var(--ink-3);overflow:hidden;margin-top:12px}
+.progress i{display:block;height:100%;background:var(--spark);border-radius:5px;transition:width .3s ease}
+
+/* ---------- tabla de posiciones ---------- */
+.rank{width:100%;border-collapse:collapse;font-size:15px}
+.rank th{
+  font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted-dark);text-align:left;font-weight:600;padding:0 10px 10px;
+}
+.rank td{padding:11px 10px;border-top:1px solid var(--line-dark)}
+.rank tr.me td{background:rgba(53,220,165,.1)}
+.rank .pos{font-family:var(--mono);font-weight:700;color:var(--muted-dark);width:46px}
+.rank .pts{font-family:var(--mono);font-weight:700;color:var(--spark);text-align:right;white-space:nowrap}
+.rank .nm{font-weight:600}
+.rank tr.me .pos{color:var(--spark)}
+
+/* ---------- podio ---------- */
+.podium{display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:14px;align-items:end;margin:10px 0 28px}
+.pod{border-radius:14px 14px 0 0;padding:18px 14px;text-align:center;color:#06121C}
+.pod .nm{font-family:var(--display);font-weight:700;font-size:clamp(15px,1.9vw,22px);line-height:1.2;
+  overflow-wrap:anywhere}
+.pod .pts{font-family:var(--mono);font-weight:700;font-size:clamp(15px,1.7vw,20px);margin-top:6px;opacity:.75}
+.pod .medal{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+  font-weight:700;opacity:.65;margin-bottom:8px}
+.pod.p1{background:var(--w1);min-height:168px}
+.pod.p2{background:var(--w3);min-height:132px}
+.pod.p3{background:var(--w5);min-height:110px;color:#fff}
+.pod.p3 .pts,.pod.p3 .medal{opacity:.8}
+@media (max-width:640px){ .podium{grid-template-columns:1fr;align-items:stretch}
+  .pod{border-radius:14px;min-height:0 !important} }
+
+/* ---------- resultado propio del jugador ---------- */
+.verdict{border-radius:16px;padding:22px;text-align:center;margin-bottom:16px;color:#fff}
+.verdict.ok{background:linear-gradient(150deg,#12A87C,#0FA0AE)}
+.verdict.no{background:linear-gradient(150deg,#3A4E63,#2A3B4D)}
+.verdict h2{font-family:var(--display);font-weight:800;font-size:clamp(22px,5vw,30px);margin:0 0 4px;letter-spacing:-.02em}
+.verdict .gain{font-family:var(--mono);font-weight:700;font-size:26px;margin-top:8px}
+.verdict .sub{font-size:14.5px;opacity:.88}
+
+/* ---------- editor de preguntas del juego ---------- */
+.qrow{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.qrow .input{flex:1}
+.qrow .pick{
+  border:1px solid var(--line);background:var(--card);border-radius:9px;padding:8px 11px;cursor:pointer;
+  font-family:var(--mono);font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap;
+}
+.qrow .pick.on{background:var(--ok);border-color:var(--ok);color:#fff}
+.stat-row{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:18px}
+.stat b{display:block;font-family:var(--mono);font-size:26px;font-weight:700;color:#fff;line-height:1.1}
+.stat span{font-size:12.5px;color:var(--muted-dark)}

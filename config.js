@@ -19,4 +19,4 @@ window.FIREBASE_CONFIG = {
 };
 
 /* Nombre que aparece en el encabezado. Cambialo si querés. */
-window.APP_NAME = "Sala";
+window.APP_NAME = "Encuesteitor";
