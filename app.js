@@ -214,6 +214,20 @@ function configMissing() {
   return !CFG.apiKey || String(CFG.apiKey).indexOf('PEGA_') === 0 || !CFG.databaseURL;
 }
 
+/* ¿Esta identidad está habilitada para crear y editar? La lista vive en la
+   base, en admins/{uid}, y solo se toca desde la consola de Firebase: nadie
+   puede agregarse a sí mismo. Las reglas exigen lo mismo del lado del
+   servidor, así que esto es únicamente para no mostrar botones que no van
+   a funcionar. */
+let isAdmin = false, adminChecked = false;
+function loadAdmin() {
+  if (adminChecked) return Promise.resolve(isAdmin);
+  return db.ref('admins/' + uid).get()
+    .then(snap => { isAdmin = snap.exists() && snap.val() !== false; adminChecked = true; return isAdmin; })
+    .catch(() => { isAdmin = false; adminChecked = true; return false; });
+}
+function ensureHost() { return ensureAuth().then(loadAdmin); }
+
 let authPromise = null;
 /* La autenticación anónima solo hace falta para crear y manejar sesiones.
    El público no se autentica: así no se crean 400 cuentas ni se choca con el
@@ -251,6 +265,7 @@ function signInGoogle() {
     throw e;
   }).then(() => {
     uid = firebase.auth().currentUser.uid;
+    adminChecked = false; isAdmin = false;
     return uid;
   });
 }
@@ -422,12 +437,14 @@ function route() {
       'No se cargó quiz.js. Copialo al lado de index.html y recargá.');
     if (!parts[1]) {
       if (!sdkOk) return renderCodeOnly();
-      return window.QUIZ.home();
+      APP().innerHTML = '<div class="setup"><p class="muted">Cargando…</p></div>';
+      return ensureHost().then(a => a ? window.QUIZ.home() : renderHomeGuest()).catch(authFail);
     }
     if (parts[1] === 'host' && parts[2]) {
       if (!sdkOk) return renderCodeOnly();
+      const cq = parts[2].toUpperCase();
       APP().innerHTML = '<div class="setup"><p class="muted">Abriendo el panel…</p></div>';
-      return ensureAuth().then(() => window.QUIZ.host(parts[2].toUpperCase())).catch(authFail);
+      return ensureHost().then(a => a ? window.QUIZ.host(cq) : notHost(cq)).catch(authFail);
     }
     return window.QUIZ.play(parts[1].toUpperCase());
   }
@@ -436,9 +453,17 @@ function route() {
     if (!sdkOk) return renderCodeOnly();
     const c = parts[1].toUpperCase();
     APP().innerHTML = '<div class="setup"><p class="muted">Abriendo el panel…</p></div>';
-    return ensureAuth().then(() => renderHost(c)).catch(authFail);
+    return ensureHost().then(a => a ? renderHost(c) : notHost(c)).catch(authFail);
   }
   return renderJoin(parts[0].toUpperCase());
+}
+
+/* Alguien que no es anfitrión pidió una pantalla de edición: le ofrecemos
+   lo que sí puede hacer con ese código. */
+function notHost(code) {
+  return renderFatal('Esta pantalla es del anfitrión',
+    'El panel donde se arman y se manejan las preguntas lo abre únicamente quien creó la sesión. Si te compartieron el código, entrá como participante.',
+    `<a class="btn btn-primary" href="#/${esc(code)}">Entrar como participante</a>`);
 }
 
 /* Servicios que el módulo competitivo toma prestados de acá, para que haya
@@ -459,6 +484,8 @@ window.ENC = {
   },
   stop: detachAll,
   ensureAuth: ensureAuth,
+  ensureHost: ensureHost,
+  isAdmin: () => isAdmin,
   signInGoogle: signInGoogle,
   dbMsg: dbMsg,
   randomCode: randomCode,
@@ -557,7 +584,50 @@ function fmtDate(ms) {
   catch (e) { return ''; }
 }
 
+/* La portada tiene dos caras: la del anfitrión, con todo; y la del público,
+   que solo puede entrar con un código. Cuál se muestra no depende de la
+   dirección —que es la misma y cualquiera puede escribirla— sino de si la
+   identidad está habilitada. */
 function renderHome() {
+  APP().innerHTML = topbar('', '') + '<div class="setup"><p class="muted">Cargando…</p></div>';
+  ensureHost().then(admin => admin ? renderHomeHost() : renderHomeGuest()).catch(authFail);
+}
+
+function renderHomeGuest() {
+  APP().innerHTML = topbar('', '') + `
+  <div class="home">
+    <div class="home-hero">
+      <p class="eyebrow">Nubes de palabras, encuestas y competencias en vivo</p>
+      <h1>Ya está la pregunta en pantalla. <em>¡Contestemos!</em></h1>
+      <p>Escribí el código que aparece proyectado y entrá. No hace falta registrarse
+         ni dejar ningún dato.</p>
+    </div>
+    <div class="card" style="max-width:480px">
+      <h3>Entrá con tu código</h3>
+      <div class="split" style="margin-top:6px">
+        <input class="input" id="jc" placeholder="ABC123" maxlength="6"
+               style="font-family:var(--mono);text-transform:uppercase;letter-spacing:.12em;font-size:19px;padding:14px">
+        <button class="btn btn-primary btn-lg" id="jb">Entrar</button>
+      </div>
+    </div>
+    <p class="muted" style="margin-top:30px">¿Sos el anfitrión?
+      <button class="btn btn-sm" id="gg" style="margin-left:6px">Entrar con Google</button></p>
+  </div>`;
+  const join = () => {
+    const c = (document.getElementById('jc').value || '').trim().toUpperCase();
+    if (c.length === 6) location.hash = '#/' + c; else toast('El código tiene 6 caracteres');
+  };
+  document.getElementById('jb').onclick = join;
+  const inp = document.getElementById('jc');
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
+  inp.focus();
+  document.getElementById('gg').onclick = () =>
+    signInGoogle().then(loadAdmin)
+      .then(a => a ? renderHomeHost() : toast('Esa cuenta no está habilitada para crear sesiones'))
+      .catch(googleFail);
+}
+
+function renderHomeHost() {
   APP().innerHTML = topbar('', '<a class="btn btn-sm" href="#/comp">Modo competitivo</a><span id="acct"></span>') + `
   <div class="home">
     <div class="home-hero">
@@ -613,7 +683,7 @@ function renderHome() {
   document.getElementById('jb').onclick = join;
   document.getElementById('jc').addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
 
-  ensureAuth().then(() => { paintAcct(); loadMine(); }).catch(authFail);
+  paintAcct(); loadMine();
 }
 
 /* Estado de la cuenta del anfitrión, arriba a la derecha. */
