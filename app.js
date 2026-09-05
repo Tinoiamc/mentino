@@ -219,14 +219,36 @@ function configMissing() {
    puede agregarse a sí mismo. Las reglas exigen lo mismo del lado del
    servidor, así que esto es únicamente para no mostrar botones que no van
    a funcionar. */
-let isAdmin = false, adminChecked = false;
+let isAdmin = false, isOwner = false, adminChecked = false;
 function loadAdmin() {
   if (adminChecked) return Promise.resolve(isAdmin);
   return db.ref('admins/' + uid).get()
-    .then(snap => { isAdmin = snap.exists() && snap.val() !== false; adminChecked = true; return isAdmin; })
-    .catch(() => { isAdmin = false; adminChecked = true; return false; });
+    .then(snap => {
+      const v = snap.exists() ? snap.val() : null;
+      isAdmin = v !== null && v !== false;   // true (dueño) u objeto (invitado)
+      isOwner = v === true;                  // solo el dueño puede prestar
+      adminChecked = true;
+      return isAdmin;
+    })
+    .catch(() => { isAdmin = false; isOwner = false; adminChecked = true; return false; });
 }
 function ensureHost() { return ensureAuth().then(loadAdmin); }
+
+/* Canjear un código de anfitrión. Lo único que hace es anotarse a sí mismo
+   en la lista, y las reglas de la base solo lo aceptan si ese código existe
+   y está activo. Nadie puede anotar a otro ni cambiar su propia entrada. */
+function redeemInvite(code) {
+  return db.ref('admins/' + uid).set({
+    via: code, at: firebase.database.ServerValue.TIMESTAMP
+  }).then(() => { adminChecked = false; return loadAdmin(); });
+}
+function createInvite(nota) {
+  const code = randomCode(8);
+  return db.ref('invites/' + code).set({
+    activo: true, nota: (nota || '').trim().slice(0, 40),
+    creado: firebase.database.ServerValue.TIMESTAMP, por: uid
+  }).then(() => code);
+}
 
 let authPromise = null;
 /* La autenticación anónima solo hace falta para crear y manejar sesiones.
@@ -611,7 +633,19 @@ function renderHomeGuest() {
       </div>
     </div>
     <p class="muted" style="margin-top:30px">¿Sos el anfitrión?
-      <button class="btn btn-sm" id="gg" style="margin-left:6px">Entrar con Google</button></p>
+      <button class="btn btn-sm" id="gg" style="margin-left:6px">Entrar con Google</button>
+      <button class="btn btn-sm" id="inv" style="margin-left:6px">Tengo un código de anfitrión</button></p>
+    <div class="card" id="invbox" style="max-width:480px;display:none">
+      <h3>Activar un código de anfitrión</h3>
+      <p class="muted" style="margin-top:-6px">Si te prestaron el Encuesteitor, pegá acá el código que te pasaron.
+      Se activa una sola vez en este dispositivo.</p>
+      <div class="split" style="margin-top:12px">
+        <input class="input" id="ic" placeholder="Código de anfitrión" maxlength="24"
+               style="font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em">
+        <button class="btn btn-primary" id="ib">Activar</button>
+      </div>
+      <div id="ierr" style="margin-top:12px"></div>
+    </div>
   </div>`;
   const join = () => {
     const c = (document.getElementById('jc').value || '').trim().toUpperCase();
@@ -625,6 +659,32 @@ function renderHomeGuest() {
     signInGoogle().then(loadAdmin)
       .then(a => a ? renderHomeHost() : toast('Esa cuenta no está habilitada para crear sesiones'))
       .catch(googleFail);
+
+  const box = document.getElementById('invbox');
+  document.getElementById('inv').onclick = () => {
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    if (box.style.display === 'block') document.getElementById('ic').focus();
+  };
+  const activar = () => {
+    const code = (document.getElementById('ic').value || '').trim().toUpperCase();
+    const err = document.getElementById('ierr');
+    err.innerHTML = '';
+    if (code.length < 6) { err.innerHTML = '<div class="notice bad">Escribí el código completo.</div>'; return; }
+    const b = document.getElementById('ib');
+    b.disabled = true; b.textContent = 'Activando…';
+    redeemInvite(code)
+      .then(ok => {
+        if (ok) { toast('Listo: ya podés crear tus propias sesiones'); renderHomeHost(); }
+        else { b.disabled = false; b.textContent = 'Activar';
+               err.innerHTML = '<div class="notice bad">El código se aceptó pero no quedó habilitado. Pedile a quien te lo pasó que lo revise.</div>'; }
+      })
+      .catch(() => {
+        b.disabled = false; b.textContent = 'Activar';
+        err.innerHTML = '<div class="notice bad">Ese código no existe, ya no está activo, o este dispositivo ya tiene un permiso activado.</div>';
+      });
+  };
+  document.getElementById('ib').onclick = activar;
+  document.getElementById('ic').addEventListener('keydown', e => { if (e.key === 'Enter') activar(); });
 }
 
 function renderHomeHost() {
@@ -666,6 +726,18 @@ function renderHomeHost() {
       <h3 style="font-family:var(--display);font-size:15px;margin:0 0 12px">Mis sesiones</h3>
       <div id="mine"><p class="muted">Cargando…</p></div>
     </section>
+    <section style="margin-top:38px" id="prestar" hidden>
+      <h3 style="font-family:var(--display);font-size:15px;margin:0 0 6px">Prestar el Encuesteitor</h3>
+      <p class="muted" style="margin:0 0 14px;max-width:62ch">Un código de anfitrión deja que otra persona cree y maneje
+      sus propias sesiones. No le da acceso a las tuyas ni a sus resultados, y lo podés apagar cuando quieras.</p>
+      <div class="split" style="max-width:520px;margin-bottom:8px">
+        <input class="input" id="invn" placeholder="Para quién es (ej: Juan, Comunicación)" maxlength="40">
+        <button class="btn btn-primary" id="invb">Crear código</button>
+      </div>
+      <div id="invlist"><p class="muted">Cargando…</p></div>
+      <h3 style="font-family:var(--display);font-size:15px;margin:26px 0 12px">Quién tiene permiso</h3>
+      <div id="hostlist"><p class="muted">Cargando…</p></div>
+    </section>
   </div>`;
 
   document.getElementById('go').onclick = function () {
@@ -684,6 +756,90 @@ function renderHomeHost() {
   document.getElementById('jc').addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
 
   paintAcct(); loadMine();
+  if (isOwner) { document.getElementById('prestar').hidden = false; wireInvites(); }
+}
+
+/* ---------------------------------------------------------------
+   Prestar el Encuesteitor: códigos de anfitrión
+   Solo los ve el dueño. Un invitado puede crear sus propias sesiones,
+   pero no puede prestar el acceso a nadie más.
+   --------------------------------------------------------------- */
+function wireInvites() {
+  document.getElementById('invb').onclick = function () {
+    const nota = document.getElementById('invn').value;
+    this.disabled = true; this.textContent = 'Creando…';
+    createInvite(nota).then(code => {
+      document.getElementById('invn').value = '';
+      this.disabled = false; this.textContent = 'Crear código';
+      copy(code);
+      toast('Código ' + code + ' creado y copiado');
+      paintInvites();
+    }).catch(e => {
+      this.disabled = false; this.textContent = 'Crear código';
+      toast(dbMsg(e));
+    });
+  };
+  paintInvites();
+  paintHosts();
+}
+
+function paintInvites() {
+  const box = document.getElementById('invlist');
+  if (!box) return;
+  db.ref('invites').get().then(snap => {
+    const all = snap.val() || {};
+    const list = Object.keys(all).sort((a, b) => (all[b].creado || 0) - (all[a].creado || 0));
+    if (!list.length) { box.innerHTML = '<p class="muted">Todavía no creaste ningún código.</p>'; return; }
+    box.innerHTML = list.map(c => `
+      <div class="card" style="padding:12px 16px;margin-bottom:8px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px">
+          <div style="font-family:var(--mono);font-weight:700;letter-spacing:.08em">${esc(c)}</div>
+          <div class="muted" style="font-size:12.5px">${esc(all[c].nota || 'sin nota')} · ${esc(fmtDate(all[c].creado))}
+            · ${all[c].activo ? 'activo' : 'apagado'}</div>
+        </div>
+        <button class="btn btn-sm" data-cp="${esc(c)}">Copiar</button>
+        <button class="btn btn-sm" data-tg="${esc(c)}">${all[c].activo ? 'Apagar' : 'Encender'}</button>
+        <button class="btn btn-sm btn-danger" data-del="${esc(c)}">Eliminar</button>
+      </div>`).join('');
+    box.querySelectorAll('[data-cp]').forEach(b => { b.onclick = () => copy(b.dataset.cp); });
+    box.querySelectorAll('[data-tg]').forEach(b => {
+      b.onclick = () => db.ref('invites/' + b.dataset.tg + '/activo').set(!all[b.dataset.tg].activo)
+        .then(paintInvites).catch(e => toast(dbMsg(e)));
+    });
+    box.querySelectorAll('[data-del]').forEach(b => {
+      b.onclick = () => {
+        if (!confirm('Se elimina el código. Quien ya lo activó conserva el permiso hasta que se lo quites abajo.')) return;
+        db.ref('invites/' + b.dataset.del).remove().then(paintInvites).catch(e => toast(dbMsg(e)));
+      };
+    });
+  }).catch(() => { box.innerHTML = '<p class="muted">No se pudo leer la lista de códigos.</p>'; });
+}
+
+function paintHosts() {
+  const box = document.getElementById('hostlist');
+  if (!box) return;
+  db.ref('admins').get().then(snap => {
+    const all = snap.val() || {};
+    const rows = Object.keys(all).map(u => {
+      const v = all[u];
+      const yo = u === uid;
+      const via = (v && v.via) ? v.via : null;
+      return `<div class="card" style="padding:12px 16px;margin-bottom:8px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px">
+          <div style="font-weight:600">${yo ? 'Vos' : (via ? 'Invitado con el código ' + esc(via) : 'Dueño')}</div>
+          <div class="muted" style="font-size:12px;font-family:var(--mono)">${esc(u.slice(0, 10))}…${v && v.at ? ' · ' + esc(fmtDate(v.at)) : ''}</div>
+        </div>
+        ${yo ? '' : `<button class="btn btn-sm btn-danger" data-rv="${esc(u)}">Quitar el permiso</button>`}
+      </div>`;
+    }).join('');
+    box.innerHTML = rows || '<p class="muted">Nadie más tiene permiso.</p>';
+    box.querySelectorAll('[data-rv]').forEach(b => {
+      b.onclick = () => {
+        if (!confirm('Esa persona deja de poder crear y editar. Sus sesiones no se borran.')) return;
+        db.ref('admins/' + b.dataset.rv).remove().then(paintHosts).catch(e => toast(dbMsg(e)));
+      };
+    });
+  }).catch(() => { box.innerHTML = '<p class="muted">No se pudo leer la lista.</p>'; });
 }
 
 /* Estado de la cuenta del anfitrión, arriba a la derecha. */
