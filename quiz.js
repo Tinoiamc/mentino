@@ -167,11 +167,12 @@ function dbMsg(e) {
   }
   return (e && e.message) || 'Error desconocido';
 }
-function renderFatal(title, detail) {
+function renderFatal(title, detail, extra) {
   APP().innerHTML = topbar('', '') + `<div class="setup">
     <h1 style="font-family:var(--display);font-size:32px;letter-spacing:-.03em;margin:8px 0 14px">${esc(title)}</h1>
     <p class="muted">${esc(detail || '')}</p>
     <div class="btn-row" style="margin-top:18px">
+      ${extra || ''}
       <a class="btn" href="#/comp">Volver al modo competitivo</a>
       <a class="btn" href="#">Ir a las encuestas</a>
     </div></div>`;
@@ -392,11 +393,13 @@ function renderHostQuiz(code) {
   });
 
   on(qref, 'value', snap => {
-    if (!snap.exists()) return renderFatal('Esa competencia no existe', 'El código ' + code + ' no corresponde a ninguna competencia.');
+    if (!snap.exists()) { window.ENC.stop(); return renderFatal('Esa competencia no existe', 'El código ' + code + ' no corresponde a ninguna competencia.'); }
     const q = snap.val();
     if (q.owner !== uid) {
-      return renderFatal('No sos el anfitrión de esta competencia',
-        'Esta pantalla la abre solo quien la creó. Si querés jugar, entrá con el código.');
+      window.ENC.stop();
+      return renderFatal('Esta pantalla es del anfitrión',
+        'El panel donde se arman las preguntas y se maneja el juego lo abre únicamente quien creó la competencia. Si te compartieron el código, entrá a jugar.',
+        `<a class="btn btn-primary" href="#/${esc(code)}">Entrar a jugar</a>`);
     }
     S.quiz = q;
     /* Alineamos el reloj con el del servidor, que es el que usan los
@@ -568,6 +571,8 @@ function renderHostQuiz(code) {
   /* ---- pintar ---- */
   function paint() {
     if (!S.quiz) return;
+    // Si el panel ya no está en pantalla, un dato tardío no rompe nada.
+    if (!document.querySelector('.host')) return;
     const q = S.quiz;
     const list = itemsSorted(q);
 

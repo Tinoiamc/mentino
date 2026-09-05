@@ -457,6 +457,7 @@ window.ENC = {
     navKeys = fn;
     if (fn) document.addEventListener('keydown', fn);
   },
+  stop: detachAll,
   ensureAuth: ensureAuth,
   signInGoogle: signInGoogle,
   dbMsg: dbMsg,
@@ -501,13 +502,13 @@ function renderSetup() {
   </div>`;
 }
 
-function renderFatal(title, msg) {
+function renderFatal(title, msg, extra) {
   APP().innerHTML = `
   <div class="setup">
     <p class="eyebrow">Error</p>
     <h1 style="font-family:var(--display);font-size:32px;letter-spacing:-.03em;margin:8px 0 14px">${esc(title)}</h1>
     <p class="muted">${esc(msg)}</p>
-    <p><a class="btn" href="#">Volver al inicio</a></p>
+    <div class="btn-row" style="margin-top:18px">${extra || ''}<a class="btn" href="#">Volver al inicio</a></div>
   </div>`;
 }
 
@@ -561,7 +562,7 @@ function renderHome() {
   <div class="home">
     <div class="home-hero">
       <p class="eyebrow">Nubes de palabras y encuestas en vivo</p>
-      <h1>Preguntá desde el escenario. <em>Contestan desde el bolsillo.</em></h1>
+      <h1>Poné la pregunta en pantalla. <em>¡Contestemos!</em></h1>
       <p>Creás la pregunta, mostrás el QR, y las respuestas aparecen en la pantalla a medida que llegan.
          El público no se registra ni deja ningún dato: escanea y contesta.</p>
     </div>
@@ -721,11 +722,13 @@ function renderHost(code) {
   document.addEventListener('keydown', navKeys);
 
   on(sref, 'value', snap => {
-    if (!snap.exists()) return renderFatal('Esa sesión no existe', 'El código ' + code + ' no corresponde a ninguna sesión activa.');
+    if (!snap.exists()) { detachAll(); return renderFatal('Esa sesión no existe', 'El código ' + code + ' no corresponde a ninguna sesión activa.'); }
     const s = snap.val();
     if (s.owner !== uid) {
-      return renderFatal('No sos el anfitrión de esta sesión',
-        'Esta pantalla solo la puede abrir quien creó la sesión, desde el mismo navegador. Si querés participar, entrá con el código.');
+      detachAll();
+      return renderFatal('Esta pantalla es del anfitrión',
+        'El panel donde se arman y se manejan las preguntas lo abre únicamente quien creó la sesión. Si te compartieron el código, entrá como participante.',
+        `<a class="btn btn-primary" href="#/${esc(code)}">Entrar como participante</a>`);
     }
     const changedItem = !state.session || state.session.activeItem !== s.activeItem;
     state.session = s;
@@ -770,6 +773,9 @@ function renderHost(code) {
 
   /* ---- pintar ---- */
   function paint() {
+    // Si el panel ya no está en pantalla (por ejemplo porque rebotó a un
+    // aviso), un dato que llega tarde no tiene que romper nada.
+    if (!document.querySelector('.host')) return;
     const s = state.session;
     const list = itemsSorted(s);
     const activeId = s.activeItem;
@@ -834,6 +840,8 @@ function renderHost(code) {
       </section>
       <section>
         <h3>Preguntas</h3>
+        <p class="muted" style="font-size:12.5px;margin:-4px 0 10px">Tocá una para mostrarla: es la única
+        que el público puede responder en ese momento. También se cambia con las flechas del teclado.</p>
         <div class="slides">
           ${list.map(([id, it], i) => `
             <button class="slide ${id === activeId ? 'on' : ''}" data-go="${id}">

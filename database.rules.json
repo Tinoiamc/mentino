@@ -2,6 +2,7 @@
   "rules": {
     ".read": false,
     ".write": false,
+
     "sessions": {
       "$code": {
         ".read": true,
@@ -48,6 +49,53 @@
             }
           }
         }
+      }
+    },
+
+    "quizzes": {
+      "$code": {
+        ".read": true,
+        ".write": "auth != null && (data.exists() ? data.child('owner').val() === auth.uid : newData.child('owner').val() === auth.uid)"
+      }
+    },
+    "qsec": {
+      "$code": {
+        ".read": "auth != null && root.child('quizzes').child($code).child('owner').val() === auth.uid",
+        ".write": "auth != null && root.child('quizzes').child($code).child('owner').val() === auth.uid"
+      }
+    },
+    "qplayers": {
+      "$code": {
+        ".read": "auth != null && root.child('quizzes').child($code).child('owner').val() === auth.uid",
+        ".write": "auth != null && root.child('quizzes').child($code).child('owner').val() === auth.uid",
+        "$pid": {
+          ".write": "root.child('quizzes').child($code).exists() && $pid.length >= 8 && $pid.length <= 40",
+          ".validate": "newData.hasChildren(['n']) && newData.child('n').isString() && newData.child('n').val().length >= 2 && newData.child('n').val().length <= 24"
+        }
+      }
+    },
+    "qa": {
+      "$code": {
+        ".read": "auth != null && root.child('quizzes').child($code).child('owner').val() === auth.uid",
+        ".write": "auth != null && root.child('quizzes').child($code).child('owner').val() === auth.uid",
+        "$qid": {
+          "$pid": {
+            ".write": "!data.exists() && root.child('quizzes').child($code).child('live').child('st').val() === 'q' && root.child('quizzes').child($code).child('live').child('qid').val() === $qid",
+            ".validate": "newData.hasChildren(['c', 'ms']) && newData.child('c').isNumber() && newData.child('ms').isNumber() && root.child('qplayers').child($code).child($pid).exists()"
+          }
+        }
+      }
+    },
+    "qrank": {
+      "$code": {
+        ".read": true,
+        ".write": "auth != null && root.child('quizzes').child($code).child('owner').val() === auth.uid"
+      }
+    },
+    "qmine": {
+      "$uid": {
+        ".read": "auth != null && $uid === auth.uid",
+        ".write": "auth != null && $uid === auth.uid"
       }
     }
   }
