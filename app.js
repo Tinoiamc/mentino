@@ -108,12 +108,12 @@ function baseUrl() {
    --------------------------------------------------------------- */
 const BAD_WORDS = `
 puta puto putas putos putita putito mierda mierdas pelotudo pelotuda pelotudos boludo boluda boludos
-conchudo forro forra gilipollas cono concha pija verga polla joder jodete carajo culiado culiao culeado
+conchudo forro forra gilipollas cono concha bija pija verga polla joder jodete carajo culiado culiao culeado
 chupapija chupamedias sorete soreto pendejo pendeja maricon marica trolo hdp hijodeputa hijadeputa
 lameculos garca choto chota pajero pajera cagada cagon cagona zorra imbecil idiota estupido estupida
 tarado tarada mogolico mogolica retrasado subnormal tortillera punetas cojones follar folla mamahuevo
 mamaguevo pinche chingar chinga chingada culero ojete orto chupala chupame cagar cagate cagon teta tetas
-culo culos verguero prostituta puton putona
+culo culos verguero prostituta puton putona lpm lpmqlp lcdll
 fuck fucking fucker fuk fuq shit shitty bullshit bitch bitches bastard asshole arsehole cunt dick dickhead
 cock pussy whore slut motherfucker wanker bollocks twat retard retarded nigga nigger faggot fag rape rapist
 `.trim().split(/\s+/);
@@ -495,7 +495,7 @@ function renderHome() {
   <div class="home">
     <div class="home-hero">
       <p class="eyebrow">Nubes de palabras y encuestas en vivo</p>
-      <h1>Preguntá desde el escenario. <em>Contestan desde el bolsillo.</em></h1>
+      <h1>Preguntá desde el escenario. <em>Contestan desde la tribuna.</em></h1>
       <p>Creás la pregunta, mostrás el QR, y las respuestas aparecen en la pantalla a medida que llegan.
          El público no se registra ni deja ningún dato: escanea y contesta.</p>
     </div>
