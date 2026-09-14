@@ -46,16 +46,20 @@ Si entrás ahora vas a ver el cartel "Conectá tu base de datos". Es lo esperado
    - Reglas: elegí **modo bloqueado**; las reemplazamos enseguida.
 4. En la pestaña **Reglas** de esa misma pantalla, borrá todo y pegá el contenido del archivo
    `database.rules.json` de este repositorio. **Publicar**.
-5. Menú izquierdo: **Compilación → Authentication → Comenzar**. Activá dos proveedores:
-   - **Anónimo**: identidad temporal guardada en tu navegador, para empezar sin registrarte.
-   - **Google**: opcional pero recomendado si vas a usarla seguido. Te deja abrir tus paneles
-     desde cualquier computadora. Al activarlo, Firebase pide un correo de contacto del proyecto.
+5. Menú izquierdo: **Compilación → Authentication → Comenzar → Correo electrónico/contraseña →
+   Habilitar → Guardar**. (Dejá desactivado el "vínculo por correo".)
+6. En la pestaña **Users** de esa misma pantalla: **Agregar usuario**.
+   - Correo electrónico: `tino@sala.local`
+   - Contraseña: `tino123`
 
-   Los dos son solo para vos, para que nadie más pueda tocar tus preguntas ni leer las respuestas
-   crudas. **El público nunca se autentica.**
-6. Menú izquierdo: **Configuración del proyecto** (el engranaje) → bajá hasta *Tus apps* →
+   Ese correo no recibe nada, es solo un identificador. En la pantalla de ingreso vos escribís
+   `tino` y la aplicación le agrega `@sala.local` sola. Si querés otro dominio, cambialo en
+   `config.js` (`window.LOGIN_DOMAIN`). Para sumar más presentadores, agregá más usuarios acá:
+   cada uno ve solamente sus propias sesiones.
+
+7. Menú izquierdo: **Configuración del proyecto** (el engranaje) → bajá hasta *Tus apps* →
    ícono **`</>`** (web) → registrá la app con cualquier nombre → **Registrar app**.
-7. Copiá el bloque `firebaseConfig` que te muestra.
+8. Copiá el bloque `firebaseConfig` que te muestra.
 
 ---
 
@@ -89,6 +93,27 @@ Opcional: en **Authentication → Settings → Authorized domains**, dejá solo
 
 ---
 
+## Actualizar el sitio (y que el celular se entere)
+
+Cuando cambies un archivo, GitHub publica la versión nueva en un minuto, pero los navegadores
+suelen seguir usando la copia guardada de `app.js`. Por eso los enlaces de `index.html` llevan un
+número de versión:
+
+```html
+<link rel="stylesheet" href="styles.css?v=5">
+<script src="config.js?v=5"></script>
+<script src="app.js?v=5"></script>
+```
+
+**Cada vez que subas una versión nueva, cambiá ese número en los tres enlaces** (de `v=5` a `v=6`,
+y así). Con eso, todos los dispositivos descargan la copia nueva la primera vez que entran.
+
+La pantalla de ingreso muestra abajo la versión que está corriendo. Si el teléfono y la
+computadora muestran números distintos, el teléfono quedó con la copia vieja: cerrá la pestaña y
+volvé a entrar, o abrila una vez en una ventana privada.
+
+---
+
 ## Usarla en todas tus charlas
 
 La portada tiene una lista con **Mis sesiones**: cada una que creás queda ahí, con su código y su
@@ -96,14 +121,20 @@ fecha, y desde la lista podés abrir el panel, **duplicarla** o borrarla. Duplic
 preguntas en una sesión nueva con otro código: armás una vez tu batería de preguntas y la reusás
 en cada exposición, sin rehacerla ni arrastrar las respuestas de la charla anterior.
 
-Esa lista está atada a tu identidad. Con la identidad anónima vive en un solo navegador: si
-limpiás los datos del navegador o cambiás de computadora, perdés el acceso a todos los paneles
-anteriores (las respuestas quedan en la base, pero sin manera de entrar). Por eso, si la vas a
-usar seguido, hacé clic una vez en **Guardar mis sesiones con Google**, arriba a la derecha. Las
-sesiones que ya tenías se conservan y a partir de ahí entrás desde cualquier dispositivo.
+La lista está atada a tu usuario, no al navegador: entrás con `tino` y `tino123` desde cualquier
+computadora **o desde el teléfono**, y ahí están todas tus sesiones anteriores. El panel se adapta
+a la pantalla chica: podés cambiar de pregunta y ver los resultados desde el celular mientras la
+computadora proyecta.
 
 Como las respuestas no hacen falta para siempre, borrá las sesiones viejas de vez en cuando desde
 la lista: el botón elimina la sesión, sus respuestas y su resumen de una sola vez.
+
+### Cambiar la contraseña
+
+Consola de Firebase → **Authentication → Users** → los tres puntos al final de la fila →
+*Restablecer contraseña* o *Editar usuario*. La clave nunca está escrita en los archivos del
+sitio: la valida Firebase en el servidor. `tino123` es corta; si el sitio va a estar publicado
+mucho tiempo, poné una más larga.
 
 ### El público sigue siendo anónimo
 
@@ -208,13 +239,14 @@ insultos armados con ingenio; para eso están la lista propia y el botón de bor
   con consecuencias.
 - **Una respuesta por navegador**, recordada en el propio teléfono. Quien borra sus datos o entra
   desde otro dispositivo puede volver a votar.
-- **Con identidad anónima, el panel vive en un solo navegador.** Se resuelve con el botón
-  *Guardar mis sesiones con Google*, que además te deja manejar el panel desde otro dispositivo.
+- **Ocultar los resultados se aplica en la interfaz.** El celular muestra la nube recién después
+  de enviar, pero el resumen viaja por un nodo de lectura pública: alguien con conocimientos
+  técnicos y el código de la sesión podría leerlo antes de contestar. Es el precio de que el
+  público no tenga que identificarse. Si te importa que nadie lo vea antes de tiempo, apagá
+  *Mostrar los resultados en los celulares* y dejalos solo en la pantalla.
 - **Los resultados en los celulares dependen del panel abierto**: el resumen que leen los
   teléfonos lo publica el panel del presentador cada segundo y medio. Si cerrás el panel, los
   celulares dejan de actualizarse (las respuestas se siguen guardando igual).
-- **Ocultar resultados** se aplica en la interfaz. Alguien con conocimientos técnicos podría leer
-  el resumen antes de responder.
 - **Editar opciones con votos ya emitidos** desplaza los conteos. Mejor borrar las respuestas de
   esa pregunta después de editarla.
 - Hasta 60 palabras visibles por nube y 10 opciones por encuesta.

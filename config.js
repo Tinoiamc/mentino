@@ -1,22 +1,26 @@
 /* =========================================================================
-   CONFIGURACIÓN DE FIREBASE — proyecto "mentino" (mentino-e299b).
+   PEGÁ ACÁ LA CONFIGURACIÓN DE TU PROYECTO DE FIREBASE.
    La encontrás en: consola de Firebase > Configuración del proyecto >
    Tus apps > App web > SDK setup and configuration > Config.
 
-   La apiKey es pública por diseño: se ve en el código de cualquier sitio
-   que use Firebase. Lo que protege los datos son las reglas de la base
-   (database.rules.json), no esta clave.
+   Reemplazá los valores de ejemplo. No hace falta tocar ningún otro archivo.
    ========================================================================= */
 
 window.FIREBASE_CONFIG = {
-  apiKey: "AIzaSyAy9Vx4LKhFixntp58hgTjqic6nonlTCI0",
-  authDomain: "mentino-e299b.firebaseapp.com",
-  databaseURL: "https://mentino-e299b-default-rtdb.firebaseio.com",
-  projectId: "mentino-e299b",
-  storageBucket: "mentino-e299b.firebasestorage.app",
-  messagingSenderId: "1096418689580",
-  appId: "1:1096418689580:web:cc8d6855a6c58a5552c789"
+  apiKey: "PEGA_TU_API_KEY",
+  authDomain: "PEGA_TU_PROYECTO.firebaseapp.com",
+  databaseURL: "https://PEGA_TU_PROYECTO-default-rtdb.firebaseio.com",
+  projectId: "PEGA_TU_PROYECTO",
+  storageBucket: "PEGA_TU_PROYECTO.appspot.com",
+  messagingSenderId: "000000000000",
+  appId: "1:000000000000:web:0000000000000000000000"
 };
 
 /* Nombre que aparece en el encabezado. Cambialo si querés. */
-window.APP_NAME = "Encuesteitor";
+window.APP_NAME = "Sala";
+
+/* Dominio interno de los usuarios del panel. Al escribir "tino" en la pantalla
+   de ingreso, la aplicación entra como "tino@sala.local", que es el usuario que
+   creaste en Firebase (Authentication → Users). No recibe correo: es solo un
+   identificador. Cambialo únicamente si creaste tus usuarios con otro dominio. */
+window.LOGIN_DOMAIN = "sala.local";

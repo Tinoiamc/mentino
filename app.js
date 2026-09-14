@@ -1,5 +1,5 @@
 /* =====================================================================
-   Encuesteitor — nubes de palabras y encuestas en vivo
+   Sala — nubes de palabras y encuestas en vivo
    Frontend estático (GitHub Pages) + Firebase Realtime Database.
    Un solo archivo, sin build. Comentarios en español.
    ===================================================================== */
@@ -9,6 +9,7 @@
 /* ---------------------------------------------------------------
    1. Utilidades
    --------------------------------------------------------------- */
+const BUILD = '5';   // subilo cada vez que actualices el sitio (ver README)
 const APP = () => document.getElementById('app');
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
   c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -61,8 +62,6 @@ async function restPut(path, body) {
 
 const timers = [];
 function clearTimers() { while (timers.length) clearInterval(timers.pop()); }
-const waits = [];
-function clearWaits() { while (waits.length) clearTimeout(waits.pop()); }
 
 /* localStorage con respaldo en memoria por si el navegador lo bloquea */
 const memStore = {};
@@ -185,24 +184,16 @@ const mask = w => '*'.repeat(Math.max(3, String(w).replace(/\s/g, '').length));
    3. Firebase
    --------------------------------------------------------------- */
 const CFG = window.FIREBASE_CONFIG || {};
-const NAME = window.APP_NAME || 'Encuesteitor';
+const NAME = window.APP_NAME || 'Sala';
 let db = null, uid = null;
-/* ¿Cargó el SDK de Firebase? El público no lo necesita (la pantalla de
-   participante habla con la base por HTTP suelto), pero crear y manejar
-   sesiones sí. Algunos navegadores embebidos —el de WhatsApp, Teams o
-   Outlook— y algunas redes corporativas no bajan los scripts de gstatic. */
-let sdkOk = true;
 const listeners = [];   // { ref, event, cb }
-let navKeys = null;     // atajos de teclado del panel del anfitrión
 
 function detachAll() {
   clearTimers();
-  clearWaits();
   while (listeners.length) {
     const l = listeners.pop();
     try { l.ref.off(l.event, l.cb); } catch (e) {}
   }
-  if (navKeys) { document.removeEventListener('keydown', navKeys); navKeys = null; }
 }
 function on(ref, event, cb, err) {
   const bound = ref.on(event, cb, err || (e => console.warn('DB:', e && e.code)));
@@ -214,116 +205,118 @@ function configMissing() {
   return !CFG.apiKey || String(CFG.apiKey).indexOf('PEGA_') === 0 || !CFG.databaseURL;
 }
 
-/* ¿Esta identidad está habilitada para crear y editar? La lista vive en la
-   base, en admins/{uid}, y solo se toca desde la consola de Firebase: nadie
-   puede agregarse a sí mismo. Las reglas exigen lo mismo del lado del
-   servidor, así que esto es únicamente para no mostrar botones que no van
-   a funcionar. */
-let isAdmin = false, isOwner = false, adminChecked = false;
-function loadAdmin() {
-  if (adminChecked) return Promise.resolve(isAdmin);
-  return db.ref('admins/' + uid).get()
-    .then(snap => {
-      const v = snap.exists() ? snap.val() : null;
-      isAdmin = v !== null && v !== false;   // true (dueño) u objeto (invitado)
-      isOwner = v === true;                  // solo el dueño puede prestar
-      adminChecked = true;
-      return isAdmin;
-    })
-    .catch(() => { isAdmin = false; isOwner = false; adminChecked = true; return false; });
-}
-function ensureHost() { return ensureAuth().then(loadAdmin); }
+let authReady = null;
 
-/* Canjear un código de anfitrión. Lo único que hace es anotarse a sí mismo
-   en la lista, y las reglas de la base solo lo aceptan si ese código existe
-   y está activo. Nadie puede anotar a otro ni cambiar su propia entrada. */
-function redeemInvite(code) {
-  return db.ref('admins/' + uid).set({
-    via: code, at: firebase.database.ServerValue.TIMESTAMP
-  }).then(() => { adminChecked = false; return loadAdmin(); });
-}
-function createInvite(nota) {
-  const code = randomCode(8);
-  return db.ref('invites/' + code).set({
-    activo: true, nota: (nota || '').trim().slice(0, 40),
-    creado: firebase.database.ServerValue.TIMESTAMP, por: uid
-  }).then(() => code);
-}
-
-let authPromise = null;
-/* La autenticación anónima solo hace falta para crear y manejar sesiones.
-   El público no se autentica: así no se crean 400 cuentas ni se choca con el
-   límite de altas por dirección IP de una red de auditorio. */
-function ensureAuth() {
-  if (uid) return Promise.resolve(uid);
-  if (!authPromise) {
-    authPromise = new Promise((res, rej) => {
-      let settled = false;
+/* El panel exige usuario y contraseña. La clave la valida Firebase en el
+   servidor: no está escrita en este archivo ni en ningún otro del sitio.
+   El público, en cambio, no se autentica nunca. */
+function authState() {
+  if (!authReady) {
+    authReady = new Promise(res => {
       firebase.auth().onAuthStateChanged(u => {
-        if (u) {
-          uid = u.uid; db = db || firebase.database();
-          if (!settled) { settled = true; res(uid); }
-        } else if (!settled) {
-          // Nadie guardado en este navegador: identidad temporal.
-          firebase.auth().signInAnonymously().catch(rej);
-        }
+        uid = u ? u.uid : null;
+        if (u) db = db || firebase.database();
+        res(u);
       });
     });
   }
-  return authPromise;
+  return authReady;
 }
 
-/* Vincular la identidad de este navegador a una cuenta de Google, para poder
-   abrir los paneles desde cualquier dispositivo sin perder lo anterior. */
-function signInGoogle() {
-  const provider = new firebase.auth.GoogleAuthProvider();
+/* Ejecuta algo del panel solo si hay alguien identificado. */
+function withAuth(fn) {
+  authState().then(() => {
+    const u = firebase.auth().currentUser;
+    if (!u) return renderLogin();
+    uid = u.uid;
+    db = db || firebase.database();
+    fn();
+  }).catch(e => renderFatal('No se pudo verificar la sesión', (e && e.message) || ''));
+}
+
+function userLabel() {
   const u = firebase.auth().currentUser;
-  const p = (u && u.isAnonymous) ? u.linkWithPopup(provider) : firebase.auth().signInWithPopup(provider);
-  return p.catch(e => {
-    if (e.code === 'auth/credential-already-in-use' && e.credential) {
-      // Esa cuenta de Google ya tenía sesiones propias: entramos con ella.
-      return firebase.auth().signInWithCredential(e.credential);
-    }
-    throw e;
-  }).then(() => {
-    uid = firebase.auth().currentUser.uid;
-    adminChecked = false; isAdmin = false;
-    return uid;
+  if (!u || !u.email) return '';
+  const dom = '@' + (window.LOGIN_DOMAIN || 'sala.local');
+  return u.email.slice(-dom.length) === dom ? u.email.slice(0, -dom.length) : u.email;
+}
+
+function signOut() {
+  firebase.auth().signOut().then(() => {
+    uid = null; authReady = null; location.hash = ''; renderLogin();
   });
 }
 
-function googleFail(e) {
+function loginError(e) {
   const c = (e && e.code) || '';
-  if (c === 'auth/operation-not-allowed') return toast('Falta activar el proveedor Google en la consola de Firebase');
-  if (c === 'auth/popup-blocked') return toast('El navegador bloqueó la ventana. Permitila y probá de nuevo');
-  if (c === 'auth/popup-closed-by-user' || c === 'auth/cancelled-popup-request') return;
-  if (c === 'auth/unauthorized-domain') return toast('Agregá este dominio en Authentication → Settings → Authorized domains');
-  toast('No se pudo entrar con Google');
+  if (c === 'auth/operation-not-allowed') {
+    return 'Falta activar el proveedor "Correo electrónico/contraseña" en la consola de Firebase.';
+  }
+  if (c === 'auth/too-many-requests') {
+    return 'Demasiados intentos fallidos. Esperá unos minutos y volvé a probar.';
+  }
+  if (c === 'auth/network-request-failed') return 'Sin conexión. Revisá la red y probá de nuevo.';
+  return 'Usuario o contraseña incorrectos.';
 }
 
-function authFail(e) {
-  if (e && (e.code === 'auth/operation-not-allowed' || e.code === 'auth/admin-restricted-operation')) {
-    renderFatal('Falta activar el acceso anónimo',
-      'En la consola de Firebase entrá en Authentication → Sign-in method y activá el proveedor "Anónimo". Después recargá esta página.');
-  } else {
-    renderFatal('No se pudo conectar', (e && e.message) || 'Error desconocido');
-  }
+function renderLogin() {
+  APP().innerHTML = topbar('', '') + `
+  <div class="home" style="max-width:460px">
+    <div class="home-hero" style="margin-bottom:26px">
+      <p class="eyebrow">Panel del presentador</p>
+      <h1 style="font-size:clamp(28px,6vw,40px)">Entrá para armar tus preguntas.</h1>
+    </div>
+    <div class="card">
+      <div class="field">
+        <label for="lu">Usuario</label>
+        <input class="input" id="lu" autocomplete="username" autocapitalize="none" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="lp">Contraseña</label>
+        <input class="input" id="lp" type="password" autocomplete="current-password">
+      </div>
+      <div id="lerr"></div>
+      <button class="btn btn-primary btn-lg" id="lb" style="width:100%">Entrar</button>
+      <p class="muted" style="font-size:13px;margin:16px 0 0">
+        Esto es solo para vos. El público no entra por acá: escanea el QR y contesta.</p>
+    </div>
+    <p class="muted" style="font-size:12px;font-family:var(--mono);text-align:center;margin-top:14px">
+      versión ${esc(BUILD)}</p>
+  </div>`;
+
+  const lu = document.getElementById('lu'), lp = document.getElementById('lp'), lb = document.getElementById('lb');
+  const go = () => {
+    const user = (lu.value || '').trim().toLowerCase();
+    const pass = lp.value || '';
+    const err = document.getElementById('lerr');
+    err.innerHTML = '';
+    if (!user || !pass) { err.innerHTML = '<div class="notice bad">Completá usuario y contraseña.</div>'; return; }
+    const email = user.indexOf('@') >= 0 ? user : user + '@' + (window.LOGIN_DOMAIN || 'sala.local');
+    lb.disabled = true; lb.textContent = 'Entrando…';
+    firebase.auth().signInWithEmailAndPassword(email, pass)
+      .then(cred => {
+        uid = cred.user.uid; db = db || firebase.database();
+        route();
+      })
+      .catch(e => {
+        lb.disabled = false; lb.textContent = 'Entrar';
+        document.getElementById('lerr').innerHTML = '<div class="notice bad">' + esc(loginError(e)) + '</div>';
+        lp.value = ''; lp.focus();
+      });
+  };
+  lb.onclick = go;
+  [lu, lp].forEach(i => i.addEventListener('keydown', e => { if (e.key === 'Enter') go(); }));
+  lu.focus();
 }
 
 function boot() {
   if (configMissing()) return renderSetup();
-  DBU = String(CFG.databaseURL || '').replace(/\/+$/, '');
-  if (typeof firebase === 'undefined' || !firebase.initializeApp) {
-    // Sin SDK: el público igual puede entrar con su código.
-    sdkOk = false;
-    return route();
-  }
   try {
     firebase.initializeApp(CFG);
   } catch (e) {
-    sdkOk = false;
-    return route();
+    return renderFatal('No se pudo iniciar Firebase', e.message);
   }
+  DBU = String(CFG.databaseURL || '').replace(/\/+$/, '');
   route();
 }
 
@@ -353,7 +346,12 @@ function itemsSorted(session) {
 }
 
 async function createSession(title) {
-  const code = await window.ENC.freeCode(6);
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code = randomCode(6);
+    const snap = await db.ref('sessions/' + code).get();
+    if (!snap.exists()) break;
+  }
   const id = 'q' + Date.now().toString(36);
   const items = {}; items[id] = newItem('cloud', 1);
   const name = title && title.trim() ? title.trim() : 'Sesión sin título';
@@ -408,28 +406,6 @@ async function duplicateSession(from) {
   return code;
 }
 
-/* Deja constancia de que una pregunta se reinició. Los celulares que ya
-   habían respondido leen este valor y vuelven a habilitar el formulario:
-   sin esto quedarían con el "ya respondiste" guardado en el navegador.
-   Si las reglas de la base rechazaran el campo, el borrado igual se hizo. */
-function markReset(code, itemIds) {
-  const up = {};
-  itemIds.forEach(id => { up['items/' + id + '/resetAt'] = firebase.database.ServerValue.TIMESTAMP; });
-  return db.ref('sessions/' + code).update(up).then(() => true).catch(e => {
-    console.warn('No se pudo marcar el reinicio:', e && e.code);
-    return false;
-  });
-}
-
-/* Borra las respuestas de toda la sesión y la deja lista para volver a usarla
-   con otro público, conservando las preguntas. */
-function resetSession(code, itemIds) {
-  return Promise.all([
-    db.ref('responses/' + code).remove(),
-    db.ref('tally/' + code).remove()
-  ]).then(() => markReset(code, itemIds));
-}
-
 /* Borra la sesión completa: preguntas, respuestas, resumen y la entrada de la lista. */
 function deleteSession(code) {
   return Promise.all([
@@ -448,82 +424,17 @@ function route() {
   document.body.classList.remove('present');
   const raw = location.hash.replace(/^#\/?/, '').split('?')[0];
   const parts = raw.split('/').filter(Boolean);
-  if (!parts.length) return sdkOk ? renderHome() : renderCodeOnly();
-
-  /* Modo competitivo: vive en el mismo sitio y en la misma dirección.
-     #/comp            portada del juego
-     #/comp/host/CODE  panel del anfitrión
-     #/comp/CODE       pantalla del jugador (el público igual entra por #/CODE) */
-  if (parts[0] === 'comp') {
-    if (!window.QUIZ) return renderFatal('Falta el módulo competitivo',
-      'No se cargó quiz.js. Copialo al lado de index.html y recargá.');
-    if (!parts[1]) {
-      if (!sdkOk) return renderCodeOnly();
-      APP().innerHTML = '<div class="setup"><p class="muted">Cargando…</p></div>';
-      return ensureHost().then(a => a ? window.QUIZ.home() : renderHomeGuest()).catch(authFail);
-    }
-    if (parts[1] === 'host' && parts[2]) {
-      if (!sdkOk) return renderCodeOnly();
-      const cq = parts[2].toUpperCase();
-      APP().innerHTML = '<div class="setup"><p class="muted">Abriendo el panel…</p></div>';
-      return ensureHost().then(a => a ? window.QUIZ.host(cq) : notHost(cq)).catch(authFail);
-    }
-    return window.QUIZ.play(parts[1].toUpperCase());
+  if (!parts.length) {
+    APP().innerHTML = '<div class="setup"><p class="muted">Cargando…</p></div>';
+    return withAuth(renderHome);
   }
-
   if (parts[0] === 'host' && parts[1]) {
-    if (!sdkOk) return renderCodeOnly();
     const c = parts[1].toUpperCase();
     APP().innerHTML = '<div class="setup"><p class="muted">Abriendo el panel…</p></div>';
-    return ensureHost().then(a => a ? renderHost(c) : notHost(c)).catch(authFail);
+    return withAuth(() => renderHost(c));
   }
   return renderJoin(parts[0].toUpperCase());
 }
-
-/* Alguien que no es anfitrión pidió una pantalla de edición: le ofrecemos
-   lo que sí puede hacer con ese código. */
-function notHost(code) {
-  return renderFatal('Esta pantalla es del anfitrión',
-    'El panel donde se arman y se manejan las preguntas lo abre únicamente quien creó la sesión. Si te compartieron el código, entrá como participante.',
-    `<a class="btn btn-primary" href="#/${esc(code)}">Entrar como participante</a>`);
-}
-
-/* Servicios que el módulo competitivo toma prestados de acá, para que haya
-   una sola conexión, un solo ruteo y una sola limpieza al cambiar de
-   pantalla. quiz.js no inicializa Firebase ni escucha el hash por su cuenta. */
-window.ENC = {
-  db: () => db,
-  uid: () => uid,
-  dbu: () => DBU,
-  sdkOk: () => sdkOk,
-  on: on,
-  timer: id => { timers.push(id); return id; },
-  wait: id => { waits.push(id); return id; },
-  navKeys: fn => {
-    if (navKeys) document.removeEventListener('keydown', navKeys);
-    navKeys = fn;
-    if (fn) document.addEventListener('keydown', fn);
-  },
-  stop: detachAll,
-  ensureAuth: ensureAuth,
-  ensureHost: ensureHost,
-  isAdmin: () => isAdmin,
-  signInGoogle: signInGoogle,
-  dbMsg: dbMsg,
-  randomCode: randomCode,
-  freeCode: async function (n) {
-    // Un código no puede chocar con el de una encuesta ni con el de otra
-    // competencia: el público entra a las dos por la misma dirección.
-    for (let i = 0; i < 8; i++) {
-      const c = randomCode(n || 6);
-      const a = await db.ref('sessions/' + c + '/owner').get();
-      if (a.exists()) continue;
-      const b = await db.ref('quizzes/' + c + '/owner').get();
-      if (!b.exists()) return c;
-    }
-    throw new Error('No pudimos generar un código libre. Probá otra vez.');
-  }
-};
 window.addEventListener('hashchange', route);
 
 /* ---------------------------------------------------------------
@@ -551,41 +462,14 @@ function renderSetup() {
   </div>`;
 }
 
-function renderFatal(title, msg, extra) {
+function renderFatal(title, msg) {
   APP().innerHTML = `
   <div class="setup">
     <p class="eyebrow">Error</p>
     <h1 style="font-family:var(--display);font-size:32px;letter-spacing:-.03em;margin:8px 0 14px">${esc(title)}</h1>
     <p class="muted">${esc(msg)}</p>
-    <div class="btn-row" style="margin-top:18px">${extra || ''}<a class="btn" href="#">Volver al inicio</a></div>
+    <p><a class="btn" href="#">Volver al inicio</a></p>
   </div>`;
-}
-
-/* Pantalla para navegadores que no pudieron cargar el SDK. Participar sigue
-   siendo posible: solo hace falta el código de seis caracteres. */
-function renderCodeOnly() {
-  APP().innerHTML = topbar('', '') + `
-  <div class="setup">
-    <p class="eyebrow">Este navegador no cargó todo</p>
-    <h1 style="font-family:var(--display);font-size:32px;letter-spacing:-.03em;margin:8px 0 14px">
-      Entrá con tu código</h1>
-    <p class="muted">Pasa seguido cuando el link se abre dentro de otra aplicación (WhatsApp, Teams,
-      Outlook) o en una red que bloquea algunos servidores de Google. Para <strong>participar</strong>
-      no hace falta nada de eso: escribí abajo el código de seis caracteres que muestra quien presenta.</p>
-    <div class="split" style="margin-top:16px">
-      <input class="input" id="jc2" placeholder="ABC123" maxlength="6"
-             style="font-family:var(--mono);text-transform:uppercase;letter-spacing:.12em">
-      <button class="btn btn-primary" id="jb2">Entrar</button>
-    </div>
-    <p class="muted" style="margin-top:18px">Para crear o manejar una sesión, abrí este link en Chrome
-      o Safari: en WhatsApp, los tres puntos de arriba a la derecha → “Abrir en el navegador”.</p>
-  </div>`;
-  const join = () => {
-    const c = (document.getElementById('jc2').value || '').trim().toUpperCase();
-    if (c.length === 6) location.hash = '#/' + c; else toast('El código tiene 6 caracteres');
-  };
-  document.getElementById('jb2').onclick = join;
-  document.getElementById('jc2').addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
 }
 
 function topbar(titleHtml, actionsHtml) {
@@ -606,93 +490,12 @@ function fmtDate(ms) {
   catch (e) { return ''; }
 }
 
-/* La portada tiene dos caras: la del anfitrión, con todo; y la del público,
-   que solo puede entrar con un código. Cuál se muestra no depende de la
-   dirección —que es la misma y cualquiera puede escribirla— sino de si la
-   identidad está habilitada. */
 function renderHome() {
-  APP().innerHTML = topbar('', '') + '<div class="setup"><p class="muted">Cargando…</p></div>';
-  ensureHost().then(admin => admin ? renderHomeHost() : renderHomeGuest()).catch(authFail);
-}
-
-function renderHomeGuest() {
-  APP().innerHTML = topbar('', '') + `
-  <div class="home">
-    <div class="home-hero">
-      <p class="eyebrow">Nubes de palabras, encuestas y competencias en vivo</p>
-      <h1>Ya está la pregunta en pantalla. <em>¡Contestemos!</em></h1>
-      <p>Escribí el código que aparece proyectado y entrá. No hace falta registrarse
-         ni dejar ningún dato.</p>
-    </div>
-    <div class="card" style="max-width:480px">
-      <h3>Entrá con tu código</h3>
-      <div class="split" style="margin-top:6px">
-        <input class="input" id="jc" placeholder="ABC123" maxlength="6"
-               style="font-family:var(--mono);text-transform:uppercase;letter-spacing:.12em;font-size:19px;padding:14px">
-        <button class="btn btn-primary btn-lg" id="jb">Entrar</button>
-      </div>
-    </div>
-    <p class="muted" style="margin-top:30px">¿Sos el anfitrión?
-      <button class="btn btn-sm" id="gg" style="margin-left:6px">Entrar con Google</button>
-      <button class="btn btn-sm" id="inv" style="margin-left:6px">Tengo un código de anfitrión</button></p>
-    <div class="card" id="invbox" style="max-width:480px;display:none">
-      <h3>Activar un código de anfitrión</h3>
-      <p class="muted" style="margin-top:-6px">Si te prestaron el Encuesteitor, pegá acá el código que te pasaron.
-      Se activa una sola vez en este dispositivo.</p>
-      <div class="split" style="margin-top:12px">
-        <input class="input" id="ic" placeholder="Código de anfitrión" maxlength="24"
-               style="font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em">
-        <button class="btn btn-primary" id="ib">Activar</button>
-      </div>
-      <div id="ierr" style="margin-top:12px"></div>
-    </div>
-  </div>`;
-  const join = () => {
-    const c = (document.getElementById('jc').value || '').trim().toUpperCase();
-    if (c.length === 6) location.hash = '#/' + c; else toast('El código tiene 6 caracteres');
-  };
-  document.getElementById('jb').onclick = join;
-  const inp = document.getElementById('jc');
-  inp.addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
-  inp.focus();
-  document.getElementById('gg').onclick = () =>
-    signInGoogle().then(loadAdmin)
-      .then(a => a ? renderHomeHost() : toast('Esa cuenta no está habilitada para crear sesiones'))
-      .catch(googleFail);
-
-  const box = document.getElementById('invbox');
-  document.getElementById('inv').onclick = () => {
-    box.style.display = box.style.display === 'none' ? 'block' : 'none';
-    if (box.style.display === 'block') document.getElementById('ic').focus();
-  };
-  const activar = () => {
-    const code = (document.getElementById('ic').value || '').trim().toUpperCase();
-    const err = document.getElementById('ierr');
-    err.innerHTML = '';
-    if (code.length < 6) { err.innerHTML = '<div class="notice bad">Escribí el código completo.</div>'; return; }
-    const b = document.getElementById('ib');
-    b.disabled = true; b.textContent = 'Activando…';
-    redeemInvite(code)
-      .then(ok => {
-        if (ok) { toast('Listo: ya podés crear tus propias sesiones'); renderHomeHost(); }
-        else { b.disabled = false; b.textContent = 'Activar';
-               err.innerHTML = '<div class="notice bad">El código se aceptó pero no quedó habilitado. Pedile a quien te lo pasó que lo revise.</div>'; }
-      })
-      .catch(() => {
-        b.disabled = false; b.textContent = 'Activar';
-        err.innerHTML = '<div class="notice bad">Ese código no existe, ya no está activo, o este dispositivo ya tiene un permiso activado.</div>';
-      });
-  };
-  document.getElementById('ib').onclick = activar;
-  document.getElementById('ic').addEventListener('keydown', e => { if (e.key === 'Enter') activar(); });
-}
-
-function renderHomeHost() {
-  APP().innerHTML = topbar('', '<a class="btn btn-sm" href="#/comp">Modo competitivo</a><span id="acct"></span>') + `
+  APP().innerHTML = topbar('', '<span id="acct"></span>') + `
   <div class="home">
     <div class="home-hero">
       <p class="eyebrow">Nubes de palabras y encuestas en vivo</p>
-      <h1>Poné la pregunta en pantalla. <em>¡Contestemos!</em></h1>
+      <h1>Preguntá desde el escenario. <em>Contestan desde el bolsillo.</em></h1>
       <p>Creás la pregunta, mostrás el QR, y las respuestas aparecen en la pantalla a medida que llegan.
          El público no se registra ni deja ningún dato: escanea y contesta.</p>
     </div>
@@ -718,34 +521,19 @@ function renderHomeHost() {
                  style="font-family:var(--mono);text-transform:uppercase;letter-spacing:.12em">
           <button class="btn btn-primary" id="jb">Entrar</button>
         </div>
-        <p class="muted" style="margin-top:18px">¿Querés una competencia con puntaje y ranking?
-          <a href="#/comp">Abrí el modo competitivo</a>.</p>
       </div>
     </div>
     <section style="margin-top:38px">
       <h3 style="font-family:var(--display);font-size:15px;margin:0 0 12px">Mis sesiones</h3>
       <div id="mine"><p class="muted">Cargando…</p></div>
     </section>
-    <section style="margin-top:38px" id="prestar" hidden>
-      <h3 style="font-family:var(--display);font-size:15px;margin:0 0 6px">Prestar el Encuesteitor</h3>
-      <p class="muted" style="margin:0 0 14px;max-width:62ch">Un código de anfitrión deja que otra persona cree y maneje
-      sus propias sesiones. No le da acceso a las tuyas ni a sus resultados, y lo podés apagar cuando quieras.</p>
-      <div class="split" style="max-width:520px;margin-bottom:8px">
-        <input class="input" id="invn" placeholder="Para quién es (ej: Juan, Comunicación)" maxlength="40">
-        <button class="btn btn-primary" id="invb">Crear código</button>
-      </div>
-      <div id="invlist"><p class="muted">Cargando…</p></div>
-      <h3 style="font-family:var(--display);font-size:15px;margin:26px 0 12px">Quién tiene permiso</h3>
-      <div id="hostlist"><p class="muted">Cargando…</p></div>
-    </section>
   </div>`;
 
   document.getElementById('go').onclick = function () {
     this.disabled = true; this.textContent = 'Creando…';
-    const t = document.getElementById('ttl').value;
-    ensureAuth().then(() => createSession(t)).catch(e => {
-      if (e && String(e.code || '').indexOf('auth/') === 0) return authFail(e);
-      renderFatal('No se pudo crear la sesión', dbMsg(e));
+    createSession(document.getElementById('ttl').value).catch(e => {
+      this.disabled = false; this.textContent = 'Crear sesión';
+      toast(dbMsg(e));
     });
   };
   const join = () => {
@@ -755,111 +543,17 @@ function renderHomeHost() {
   document.getElementById('jb').onclick = join;
   document.getElementById('jc').addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
 
-  paintAcct(); loadMine();
-  if (isOwner) { document.getElementById('prestar').hidden = false; wireInvites(); }
-}
-
-/* ---------------------------------------------------------------
-   Prestar el Encuesteitor: códigos de anfitrión
-   Solo los ve el dueño. Un invitado puede crear sus propias sesiones,
-   pero no puede prestar el acceso a nadie más.
-   --------------------------------------------------------------- */
-function wireInvites() {
-  document.getElementById('invb').onclick = function () {
-    const nota = document.getElementById('invn').value;
-    this.disabled = true; this.textContent = 'Creando…';
-    createInvite(nota).then(code => {
-      document.getElementById('invn').value = '';
-      this.disabled = false; this.textContent = 'Crear código';
-      copy(code);
-      toast('Código ' + code + ' creado y copiado');
-      paintInvites();
-    }).catch(e => {
-      this.disabled = false; this.textContent = 'Crear código';
-      toast(dbMsg(e));
-    });
-  };
-  paintInvites();
-  paintHosts();
-}
-
-function paintInvites() {
-  const box = document.getElementById('invlist');
-  if (!box) return;
-  db.ref('invites').get().then(snap => {
-    const all = snap.val() || {};
-    const list = Object.keys(all).sort((a, b) => (all[b].creado || 0) - (all[a].creado || 0));
-    if (!list.length) { box.innerHTML = '<p class="muted">Todavía no creaste ningún código.</p>'; return; }
-    box.innerHTML = list.map(c => `
-      <div class="card" style="padding:12px 16px;margin-bottom:8px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-        <div style="flex:1;min-width:200px">
-          <div style="font-family:var(--mono);font-weight:700;letter-spacing:.08em">${esc(c)}</div>
-          <div class="muted" style="font-size:12.5px">${esc(all[c].nota || 'sin nota')} · ${esc(fmtDate(all[c].creado))}
-            · ${all[c].activo ? 'activo' : 'apagado'}</div>
-        </div>
-        <button class="btn btn-sm" data-cp="${esc(c)}">Copiar</button>
-        <button class="btn btn-sm" data-tg="${esc(c)}">${all[c].activo ? 'Apagar' : 'Encender'}</button>
-        <button class="btn btn-sm btn-danger" data-del="${esc(c)}">Eliminar</button>
-      </div>`).join('');
-    box.querySelectorAll('[data-cp]').forEach(b => { b.onclick = () => copy(b.dataset.cp); });
-    box.querySelectorAll('[data-tg]').forEach(b => {
-      b.onclick = () => db.ref('invites/' + b.dataset.tg + '/activo').set(!all[b.dataset.tg].activo)
-        .then(paintInvites).catch(e => toast(dbMsg(e)));
-    });
-    box.querySelectorAll('[data-del]').forEach(b => {
-      b.onclick = () => {
-        if (!confirm('Se elimina el código. Quien ya lo activó conserva el permiso hasta que se lo quites abajo.')) return;
-        db.ref('invites/' + b.dataset.del).remove().then(paintInvites).catch(e => toast(dbMsg(e)));
-      };
-    });
-  }).catch(() => { box.innerHTML = '<p class="muted">No se pudo leer la lista de códigos.</p>'; });
-}
-
-function paintHosts() {
-  const box = document.getElementById('hostlist');
-  if (!box) return;
-  db.ref('admins').get().then(snap => {
-    const all = snap.val() || {};
-    const rows = Object.keys(all).map(u => {
-      const v = all[u];
-      const yo = u === uid;
-      const via = (v && v.via) ? v.via : null;
-      return `<div class="card" style="padding:12px 16px;margin-bottom:8px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-        <div style="flex:1;min-width:200px">
-          <div style="font-weight:600">${yo ? 'Vos' : (via ? 'Invitado con el código ' + esc(via) : 'Dueño')}</div>
-          <div class="muted" style="font-size:12px;font-family:var(--mono)">${esc(u.slice(0, 10))}…${v && v.at ? ' · ' + esc(fmtDate(v.at)) : ''}</div>
-        </div>
-        ${yo ? '' : `<button class="btn btn-sm btn-danger" data-rv="${esc(u)}">Quitar el permiso</button>`}
-      </div>`;
-    }).join('');
-    box.innerHTML = rows || '<p class="muted">Nadie más tiene permiso.</p>';
-    box.querySelectorAll('[data-rv]').forEach(b => {
-      b.onclick = () => {
-        if (!confirm('Esa persona deja de poder crear y editar. Sus sesiones no se borran.')) return;
-        db.ref('admins/' + b.dataset.rv).remove().then(paintHosts).catch(e => toast(dbMsg(e)));
-      };
-    });
-  }).catch(() => { box.innerHTML = '<p class="muted">No se pudo leer la lista.</p>'; });
+  paintAcct();
+  loadMine();
 }
 
 /* Estado de la cuenta del anfitrión, arriba a la derecha. */
 function paintAcct() {
   const el = document.getElementById('acct');
   if (!el) return;
-  const u = firebase.auth().currentUser;
-  if (u && !u.isAnonymous) {
-    el.innerHTML = `<span class="muted" style="font-size:13px;margin-right:8px">${esc(u.displayName || u.email || '')}</span>
-      <button class="btn btn-sm" id="out">Salir</button>`;
-    document.getElementById('out').onclick = () => {
-      firebase.auth().signOut().then(() => { uid = null; authPromise = null; route(); });
-    };
-  } else {
-    el.innerHTML = `<button class="btn btn-sm" id="gsi">Guardar mis sesiones con Google</button>`;
-    document.getElementById('gsi').onclick = () => {
-      signInGoogle().then(() => { paintAcct(); loadMine(); toast('Listo: ahora abrís tus paneles desde cualquier dispositivo'); })
-        .catch(googleFail);
-    };
-  }
+  el.innerHTML = `<span class="muted" style="font-size:13px;margin-right:8px">${esc(userLabel())}</span>
+    <button class="btn btn-sm" id="out">Salir</button>`;
+  document.getElementById('out').onclick = signOut;
 }
 
 /* Lista de sesiones propias. */
@@ -922,39 +616,12 @@ function renderHost(code) {
 
   const sref = db.ref('sessions/' + code);
 
-  /* Atajos de teclado: ← y → cambian de pregunta sin buscar la barra lateral
-     (útil cuando volvés de la presentación y querés activar la siguiente).
-     En modo presentación, la barra espaciadora abre y cierra la votación.
-     No se activan mientras se escribe en un campo. */
-  navKeys = function (e) {
-    const t = e.target;
-    if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
-    if (!state.session) return;
-    const list = itemsSorted(state.session);
-    const i = list.findIndex(([id]) => id === state.session.activeItem);
-    if (e.key === 'ArrowRight' || e.key === 'PageDown') {
-      if (i > -1 && i < list.length - 1) { e.preventDefault(); sref.child('activeItem').set(list[i + 1][0]); }
-    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
-      if (i > 0) { e.preventDefault(); sref.child('activeItem').set(list[i - 1][0]); }
-    } else if ((e.key === ' ' || e.key === 'Spacebar') && document.body.classList.contains('present')) {
-      e.preventDefault();
-      const abierta = state.session.open !== false;
-      sref.child('open').set(!abierta);
-      toast(abierta ? 'Votación cerrada' : 'Votación abierta');
-    } else if (e.key === 'Escape') {
-      document.body.classList.remove('present');
-    }
-  };
-  document.addEventListener('keydown', navKeys);
-
   on(sref, 'value', snap => {
-    if (!snap.exists()) { detachAll(); return renderFatal('Esa sesión no existe', 'El código ' + code + ' no corresponde a ninguna sesión activa.'); }
+    if (!snap.exists()) return renderFatal('Esa sesión no existe', 'El código ' + code + ' no corresponde a ninguna sesión activa.');
     const s = snap.val();
     if (s.owner !== uid) {
-      detachAll();
-      return renderFatal('Esta pantalla es del anfitrión',
-        'El panel donde se arman y se manejan las preguntas lo abre únicamente quien creó la sesión. Si te compartieron el código, entrá como participante.',
-        `<a class="btn btn-primary" href="#/${esc(code)}">Entrar como participante</a>`);
+      return renderFatal('No sos el anfitrión de esta sesión',
+        'Esta pantalla solo la puede abrir quien creó la sesión, desde el mismo navegador. Si querés participar, entrá con el código.');
     }
     const changedItem = !state.session || state.session.activeItem !== s.activeItem;
     state.session = s;
@@ -999,9 +666,6 @@ function renderHost(code) {
 
   /* ---- pintar ---- */
   function paint() {
-    // Si el panel ya no está en pantalla (por ejemplo porque rebotó a un
-    // aviso), un dato que llega tarde no tiene que romper nada.
-    if (!document.querySelector('.host')) return;
     const s = state.session;
     const list = itemsSorted(s);
     const activeId = s.activeItem;
@@ -1016,7 +680,8 @@ function renderHost(code) {
         <span class="spacer"></span>
         <button class="btn btn-sm" id="bOpen"></button>
         <button class="btn btn-sm" id="bPres">Presentar</button>
-        <button class="btn btn-sm" id="bExp">Descargar resultados</button>`;
+        <button class="btn btn-sm" id="bExp">Descargar resultados</button>
+        <button class="btn btn-sm" id="bOut">Salir</button>`;
       const t = document.getElementById('ttl');
       t.onchange = () => {
         const v = t.value.trim() || 'Sesión sin título';
@@ -1026,6 +691,7 @@ function renderHost(code) {
       document.getElementById('bPres').onclick = () => document.body.classList.add('present');
       document.getElementById('bOpen').onclick = () => sref.child('open').set(!state.session.open);
       document.getElementById('bExp').onclick = () => openExport(code, state.session);
+      document.getElementById('bOut').onclick = signOut;
     }
     document.getElementById('bOpen').textContent = s.open ? 'Cerrar votación' : 'Abrir votación';
 
@@ -1066,8 +732,6 @@ function renderHost(code) {
       </section>
       <section>
         <h3>Preguntas</h3>
-        <p class="muted" style="font-size:12.5px;margin:-4px 0 10px">Tocá una para mostrarla: es la única
-        que el público puede responder en ese momento. También se cambia con las flechas del teclado.</p>
         <div class="slides">
           ${list.map(([id, it], i) => `
             <button class="slide ${id === activeId ? 'on' : ''}" data-go="${id}">
@@ -1096,12 +760,6 @@ function renderHost(code) {
         <p class="muted" style="font-size:12.5px;margin:6px 0 0">Se suman a la lista de groserías que ya trae la aplicación.</p>
       </section>
       <section>
-        <h3>Volver a empezar</h3>
-        <button class="btn btn-sm" id="rst">Borrar todas las respuestas</button>
-        <p class="muted" style="font-size:12.5px;margin:6px 0 0">Las preguntas y el código quedan igual: sirve para
-        usar la misma sesión con otro público.</p>
-      </section>
-      <section>
         <button class="btn btn-sm btn-danger" id="del">Eliminar la sesión</button>
       </section>`;
 
@@ -1109,7 +767,7 @@ function renderHost(code) {
     const qbox = document.getElementById('qr');
     qbox.innerHTML = '';
     try {
-      new QRCode(qbox, { text: url, width: 168, height: 168, colorDark: '#0B1A2A', colorLight: '#ffffff',
+      new QRCode(qbox, { text: url, width: 168, height: 168, colorDark: '#12141F', colorLight: '#ffffff',
                          correctLevel: QRCode.CorrectLevel.M });
     } catch (e) { qbox.textContent = 'QR no disponible'; }
 
@@ -1139,15 +797,6 @@ function renderHost(code) {
         sref.update(up);
       };
     });
-    document.getElementById('rst').onclick = () => {
-      if (!confirm('Se borran las respuestas de todas las preguntas de esta sesión. Las preguntas quedan como están.')) return;
-      const ids = itemsSorted(state.session).map(([id]) => id);
-      resetSession(code, ids).then(ok => {
-        state.seen = new Set();
-        toast(ok ? 'Sesión en blanco: las preguntas quedaron listas para responder de nuevo'
-                 : 'Respuestas borradas. Quien ya había respondido tendrá que tocar "Cambiar mi respuesta"');
-      });
-    };
     document.getElementById('del').onclick = () => {
       if (!confirm('Se elimina la sesión y todas sus respuestas. Esta acción no se puede deshacer.')) return;
       deleteSession(code).then(() => { location.hash = ''; });
@@ -1260,13 +909,7 @@ function renderHost(code) {
     document.getElementById('eReset').onclick = () => {
       if (!confirm('Se borran todas las respuestas de esta pregunta.')) return;
       db.ref('tally/' + code + '/' + itemId).remove();
-      db.ref('responses/' + code + '/' + itemId).remove().then(() => {
-        state.seen = new Set();
-        markReset(code, [itemId]).then(ok => {
-          toast(ok ? 'Respuestas borradas: el público puede volver a responder'
-                   : 'Respuestas borradas. Quien ya había respondido tendrá que tocar "Cambiar mi respuesta"');
-        });
-      });
+      db.ref('responses/' + code + '/' + itemId).remove().then(() => { state.seen = new Set(); toast('Respuestas borradas'); });
     };
     document.getElementById('eDel').onclick = () => {
       const list = itemsSorted(state.session);
@@ -1404,19 +1047,6 @@ function renderTally(el, tally, seen) {
 function renderJoin(code) {
   const st = { s: null, itemId: null, item: null, answered: false, tally: null, seen: new Set() };
   const pid = participantId();
-
-  /* El "ya respondí" vive en este navegador, junto con la marca de reinicio
-     que tenía la pregunta cuando se envió la respuesta. Si el anfitrión
-     borra las respuestas, esa marca cambia y el formulario se habilita solo,
-     sin pedirle a nadie que borre datos del navegador. */
-  const lockKey = id => 'sala:' + code + ':' + id;
-  const genOf = it => String((it && it.resetAt) || 0);
-  function isAnswered(id, it) {
-    const v = store.get(lockKey(id));
-    if (!v) return false;
-    return (v === '1' ? '0' : v) === genOf(it);   // '1' es el formato viejo
-  }
-
   APP().innerHTML = topbar('', '') + `<div class="join" id="jw"><p class="muted">Cargando…</p></div>`;
 
   load();
@@ -1425,14 +1055,7 @@ function renderJoin(code) {
     let s;
     try { s = await restGet('sessions/' + code); }
     catch (e) { return fail('No pudimos conectarnos. Revisá tu conexión y volvé a intentar.'); }
-    if (!s) {
-      /* Puede ser el código de una competencia: el público entra a las dos
-         por la misma dirección, así que probamos ahí antes de dar error. */
-      let q = null;
-      try { q = await restGet('quizzes/' + code); } catch (e) { q = null; }
-      if (q && window.QUIZ) return window.QUIZ.play(code);
-      return fail('No encontramos nada con el código ' + code + '. Revisalo con quien está presentando.');
-    }
+    if (!s) return fail('No encontramos ninguna sesión con el código ' + code + '. Revisalo con quien está presentando.');
     st.s = s;
     setItem(s.activeItem, (s.items || {})[s.activeItem]);
     poll();
@@ -1445,7 +1068,7 @@ function renderJoin(code) {
 
   function setItem(id, item) {
     st.itemId = id; st.item = item || null; st.tally = null; st.seen = new Set();
-    st.answered = isAnswered(id, st.item);
+    st.answered = store.get('sala:' + code + ':' + id) === '1';
     paint();
     if (canSee()) refreshTally();
   }
@@ -1467,26 +1090,11 @@ function renderJoin(code) {
         if (live.item && live.item !== st.itemId) {
           const it = await restGet('sessions/' + code + '/items/' + live.item);
           setItem(live.item, it);
-          return;
+        } else if (canSee()) {
+          refreshTally();
         }
-        if (st.answered) await checkReset();
-        if (canSee()) refreshTally();
       } catch (e) { /* un pedido perdido no rompe nada: se reintenta al siguiente ciclo */ }
     }, 4000 + Math.floor(Math.random() * 3000)));
-  }
-
-  /* Consulta de pocos bytes, solo para quien ya respondió: si el anfitrión
-     reinició la pregunta, vuelve a mostrar el formulario. */
-  async function checkReset() {
-    try {
-      const rst = await restGet('sessions/' + code + '/items/' + st.itemId + '/resetAt');
-      if (!st.item) return;
-      st.item.resetAt = rst || 0;
-      if (isAnswered(st.itemId, st.item)) return;
-      st.answered = false; st.tally = null; st.seen = new Set();
-      paint();
-      toast('El anfitrión reinició esta pregunta: podés responder de nuevo');
-    } catch (e) { /* si falla, se reintenta en el próximo ciclo */ }
   }
 
   async function refreshTally() {
@@ -1603,7 +1211,7 @@ function renderJoin(code) {
       send.disabled = true; send.textContent = 'Enviando…';
       try {
         await restPut('responses/' + code + '/' + st.itemId + '/' + pid, payload);
-        store.set(lockKey(st.itemId), genOf(st.item));
+        store.set('sala:' + code + ':' + st.itemId, '1');
         st.answered = true;
         toast('Respuesta enviada');
         paint();
