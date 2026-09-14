@@ -7,13 +7,13 @@
    ========================================================================= */
 
 window.FIREBASE_CONFIG = {
-  apiKey: "PEGA_TU_API_KEY",
-  authDomain: "PEGA_TU_PROYECTO.firebaseapp.com",
-  databaseURL: "https://PEGA_TU_PROYECTO-default-rtdb.firebaseio.com",
-  projectId: "PEGA_TU_PROYECTO",
-  storageBucket: "PEGA_TU_PROYECTO.appspot.com",
-  messagingSenderId: "000000000000",
-  appId: "1:000000000000:web:0000000000000000000000"
+  apiKey: "AIzaSyAy9Vx4LKhFixntp58hgTjqic6nonlTCI0",
+  authDomain: "mentino-e299b.firebaseapp.com",
+  databaseURL: "https://mentino-e299b-default-rtdb.firebaseio.com",
+  projectId: "mentino-e299b",
+  storageBucket: "mentino-e299b.firebasestorage.app",
+  messagingSenderId: "1096418689580",
+  appId: "1:1096418689580:web:cc8d6855a6c58a5552c789"
 };
 
 /* Nombre que aparece en el encabezado. Cambialo si querés. */
