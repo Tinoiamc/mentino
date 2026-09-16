@@ -194,7 +194,8 @@ alcanza.
 **Antes**
 
 1. Entrá a tu sitio y hacé clic en **Crear sesión**.
-2. Escribí la primera pregunta. Con **+ Nube** y **+ Encuesta** agregás las siguientes.
+2. Escribí la primera pregunta. Con **+ Nube** y **+ Encuesta** agregás las siguientes. Las
+   preguntas se reordenan **arrastrándolas** en la lista, o con las flechas ↑ ↓ de cada una.
 3. Guardá el link del panel (el que termina en `#/host/ABC123`) en los favoritos: es el único
    modo de volver a entrar, y solo funciona desde el mismo navegador con el que la creaste.
 
@@ -203,7 +204,31 @@ alcanza.
 - Proyectá el panel y usá **Presentar** para que ocupe toda la pantalla.
 - Al hacer clic en una pregunta de la lista, todos los celulares saltan a esa pregunta en pocos
   segundos.
+- Las **flechas ← →** del teclado (o las teclas AvPág/RePág de un presentador inalámbrico) pasan
+  de pregunta sin tocar el mouse.
 - **Cerrar votación** frena nuevas respuestas sin borrar nada.
+
+### Manejarlo desde el teléfono mientras la computadora proyecta
+
+En la barra lateral del panel, **Control desde el celular → Mostrar el QR de control**. Escaneá
+ese QR con tu teléfono (la primera vez te va a pedir tu usuario y contraseña) y te abre una
+pantalla chica con: la pregunta actual, *Anterior* y *Siguiente*, cuántos contestaron, el botón de
+abrir y cerrar la votación, el listado para saltar a cualquier pregunta y **los resultados en
+vivo**, así los ves sin darte vuelta.
+
+Lo que hagas ahí se refleja en la pantalla proyectada al instante. Ese QR es solo para vos: quien
+lo escanee sin tu contraseña no entra. El del público sigue siendo el otro, el de arriba.
+
+Si además de esto tenés diapositivas de PowerPoint, lo más cómodo es:
+
+1. Dejar el navegador abierto en otra ventana, con el panel en modo **Presentar**.
+2. En PowerPoint: *Presentación con diapositivas → Configurar → Examinada por una persona
+   (ventana)*. Así la presentación corre en una ventana y podés pasar al navegador con Alt+Tab
+   sin cortar nada. Si preferís el modo pantalla completa de siempre, Alt+Tab también funciona:
+   la presentación queda esperando atrás.
+3. Poné una diapositiva con el QR y el código de la sala justo antes de cada pregunta
+   interactiva, para dar tiempo a que entren mientras hablás.
+4. En el momento de la pregunta, Alt+Tab al navegador y desde ahí manejá todo con el teléfono.
 
 **Después**
 

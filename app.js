@@ -9,7 +9,7 @@
 /* ---------------------------------------------------------------
    1. Utilidades
    --------------------------------------------------------------- */
-const BUILD = '5';   // subilo cada vez que actualices el sitio (ver README)
+const BUILD = '6';   // subilo cada vez que actualices el sitio (ver README)
 const APP = () => document.getElementById('app');
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
   c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -63,6 +63,8 @@ async function restPut(path, body) {
 const timers = [];
 function clearTimers() { while (timers.length) clearInterval(timers.pop()); }
 
+let keyHandler = null;   // atajos de teclado del panel
+
 /* localStorage con respaldo en memoria por si el navegador lo bloquea */
 const memStore = {};
 let lsOk = null;
@@ -108,12 +110,12 @@ function baseUrl() {
    --------------------------------------------------------------- */
 const BAD_WORDS = `
 puta puto putas putos putita putito mierda mierdas pelotudo pelotuda pelotudos boludo boluda boludos
-conchudo forro forra gilipollas cono concha bija pija verga polla joder jodete carajo culiado culiao culeado
+conchudo forro forra gilipollas cono concha pija verga polla joder jodete carajo culiado culiao culeado
 chupapija chupamedias sorete soreto pendejo pendeja maricon marica trolo hdp hijodeputa hijadeputa
 lameculos garca choto chota pajero pajera cagada cagon cagona zorra imbecil idiota estupido estupida
 tarado tarada mogolico mogolica retrasado subnormal tortillera punetas cojones follar folla mamahuevo
 mamaguevo pinche chingar chinga chingada culero ojete orto chupala chupame cagar cagate cagon teta tetas
-culo culos verguero prostituta puton putona lpm lpmqlp lcdll
+culo culos verguero prostituta puton putona
 fuck fucking fucker fuk fuq shit shitty bullshit bitch bitches bastard asshole arsehole cunt dick dickhead
 cock pussy whore slut motherfucker wanker bollocks twat retard retarded nigga nigger faggot fag rape rapist
 `.trim().split(/\s+/);
@@ -190,6 +192,7 @@ const listeners = [];   // { ref, event, cb }
 
 function detachAll() {
   clearTimers();
+  if (keyHandler) { document.removeEventListener('keydown', keyHandler); keyHandler = null; }
   while (listeners.length) {
     const l = listeners.pop();
     try { l.ref.off(l.event, l.cb); } catch (e) {}
@@ -428,6 +431,11 @@ function route() {
     APP().innerHTML = '<div class="setup"><p class="muted">Cargando…</p></div>';
     return withAuth(renderHome);
   }
+  if (parts[0] === 'remoto' && parts[1]) {
+    const c = parts[1].toUpperCase();
+    APP().innerHTML = '<div class="setup"><p class="muted">Abriendo el control…</p></div>';
+    return withAuth(() => renderRemote(c));
+  }
   if (parts[0] === 'host' && parts[1]) {
     const c = parts[1].toUpperCase();
     APP().innerHTML = '<div class="setup"><p class="muted">Abriendo el panel…</p></div>';
@@ -495,7 +503,7 @@ function renderHome() {
   <div class="home">
     <div class="home-hero">
       <p class="eyebrow">Nubes de palabras y encuestas en vivo</p>
-      <h1>Preguntá desde el escenario. <em>Contestan desde la tribuna.</em></h1>
+      <h1>Preguntá desde el escenario. <em>Contestan desde el bolsillo.</em></h1>
       <p>Creás la pregunta, mostrás el QR, y las respuestas aparecen en la pantalla a medida que llegan.
          El público no se registra ni deja ningún dato: escanea y contesta.</p>
     </div>
@@ -616,6 +624,28 @@ function renderHost(code) {
 
   const sref = db.ref('sessions/' + code);
 
+  // Flechas del teclado para pasar de pregunta: también funciona con un
+  // presentador inalámbrico, que manda las mismas teclas.
+  keyHandler = e => {
+    const t = e.target || {};
+    const tag = (t.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || t.isContentEditable) return;
+    let d = 0;
+    if (e.key === 'ArrowRight' || e.key === 'PageDown') d = 1;
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') d = -1;
+    else return;
+    e.preventDefault();
+    step(d);
+  };
+  document.addEventListener('keydown', keyHandler);
+
+  function step(d) {
+    const s = state.session; if (!s) return;
+    const arr = itemsSorted(s).map(x => x[0]);
+    const i = arr.indexOf(s.activeItem) + d;
+    if (i >= 0 && i < arr.length) sref.child('activeItem').set(arr[i]);
+  }
+
   on(sref, 'value', snap => {
     if (!snap.exists()) return renderFatal('Esa sesión no existe', 'El código ' + code + ' no corresponde a ninguna sesión activa.');
     const s = snap.val();
@@ -625,12 +655,7 @@ function renderHost(code) {
     }
     const changedItem = !state.session || state.session.activeItem !== s.activeItem;
     state.session = s;
-    // Nodo diminuto que consultan los celulares para saber qué pregunta está activa.
-    const live = s.live || {};
-    const pr = s.phoneResults !== false;
-    if (live.item !== s.activeItem || live.open !== (s.open !== false) || live.pr !== pr) {
-      sref.child('live').set({ item: s.activeItem, open: s.open !== false, pr: pr });
-    }
+    syncLive(sref, s);
     if (changedItem) {
       state.seen = new Set();
       state.responses = {};
@@ -645,24 +670,12 @@ function renderHost(code) {
     const item = state.session.activeItem;
     if (!item) return;
     rref = db.ref('responses/' + code + '/' + item);
-    rcb = rref.on('value', snap => { state.responses = snap.val() || {}; paint(); publishSoon(); },
+    rcb = rref.on('value', snap => { state.responses = snap.val() || {}; paint(); publishSoon(state.session, state.responses); },
                   e => { state.responses = {}; paint(); });
     listeners.push({ ref: rref, event: 'value', cb: rcb });
   }
 
-  /* Publica un resumen liviano para que lo lean los celulares sin descargar
-     todas las respuestas. Como mucho una escritura cada segundo y medio. */
-  let pubTimer = null;
-  function publishSoon() {
-    if (pubTimer) return;
-    pubTimer = setTimeout(() => {
-      pubTimer = null;
-      const s = state.session; if (!s) return;
-      const item = (s.items || {})[s.activeItem]; if (!item) return;
-      if (s.phoneResults === false) return;
-      db.ref('tally/' + code + '/' + s.activeItem).set(buildTally(item, state.responses)).catch(() => {});
-    }, 1500);
-  }
+  const publishSoon = makePublisher(code);
 
   /* ---- pintar ---- */
   function paint() {
@@ -704,6 +717,7 @@ function renderHost(code) {
   function paintRail(list, activeId) {
     const rail = document.querySelector('.rail');
     const url = baseUrl() + '#/' + code;
+    const remoteUrl = baseUrl() + '#/remoto/' + code;
     const n = Object.keys(state.responses || {}).length;
 
     // Solo se reconstruye si cambió algo estructural; si no, se actualiza el contador.
@@ -734,18 +748,34 @@ function renderHost(code) {
         <h3>Preguntas</h3>
         <div class="slides">
           ${list.map(([id, it], i) => `
-            <button class="slide ${id === activeId ? 'on' : ''}" data-go="${id}">
+            <div class="slide ${id === activeId ? 'on' : ''}" data-go="${id}" data-id="${id}" draggable="true">
               <div class="slide-top">
+                <span class="grip" title="Arrastrar para reordenar">⠿</span>
                 <span class="slide-n">${i + 1}</span>
                 <span class="badge ${it.type}">${it.type === 'cloud' ? 'Nube' : 'Encuesta'}</span>
                 ${id === activeId ? '<span class="live-dot"></span>' : ''}
+                <span class="moves">
+                  <button class="mv" data-up="${id}" ${i === 0 ? 'disabled' : ''} title="Subir" aria-label="Subir">↑</button>
+                  <button class="mv" data-down="${id}" ${i === list.length - 1 ? 'disabled' : ''} title="Bajar" aria-label="Bajar">↓</button>
+                </span>
               </div>
               <div class="slide-q">${esc(it.question || 'Sin pregunta')}</div>
-            </button>`).join('')}
+            </div>`).join('')}
         </div>
         <div class="btn-row">
           <button class="btn btn-sm" data-add="cloud">+ Nube</button>
           <button class="btn btn-sm" data-add="poll">+ Encuesta</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin:9px 0 0">Arrastralas para cambiar el orden, o usá las flechas.</p>
+      </section>
+      <section>
+        <h3>Control desde el celular</h3>
+        <p class="muted" style="font-size:12.5px;margin:-4px 0 9px">Escaneá esto con tu teléfono para pasar las preguntas sin volver a la computadora.</p>
+        <button class="btn btn-sm" id="remoteBtn">Mostrar el QR de control</button>
+        <div id="remoteBox" style="display:none;margin-top:10px;text-align:center">
+          <div class="qr-frame" style="border-color:var(--accent)"><div id="qr2"></div></div>
+          <p class="muted" style="font-family:var(--mono);font-size:11px;word-break:break-all;margin:8px 0 6px">${esc(remoteUrl)}</p>
+          <button class="btn btn-sm" id="cpy2">Copiar link de control</button>
         </div>
       </section>
       <section>
@@ -783,8 +813,77 @@ function renderHost(code) {
     const phres = document.getElementById('phres');
     phres.onchange = () => sref.child('phoneResults').set(phres.checked);
 
+    // QR del control remoto, a pedido
+    const rb = document.getElementById('remoteBtn');
+    rb.onclick = () => {
+      const box = document.getElementById('remoteBox');
+      const open = box.style.display !== 'none';
+      box.style.display = open ? 'none' : 'block';
+      rb.textContent = open ? 'Mostrar el QR de control' : 'Ocultar el QR de control';
+      if (!open && !box.dataset.done) {
+        box.dataset.done = '1';
+        try {
+          new QRCode(document.getElementById('qr2'), { text: remoteUrl, width: 148, height: 148,
+            colorDark: '#12141F', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+        } catch (e) {}
+        document.getElementById('cpy2').onclick = () => copy(remoteUrl);
+      }
+    };
+
     rail.querySelectorAll('[data-go]').forEach(b => {
-      b.onclick = () => sref.child('activeItem').set(b.dataset.go);
+      b.onclick = e => {
+        if (e.target.closest('.mv')) return;   // las flechas no cambian la pregunta activa
+        sref.child('activeItem').set(b.dataset.go);
+      };
+    });
+
+    // Reordenar con las flechas
+    const ids = () => itemsSorted(state.session).map(x => x[0]);
+    const move = (id, delta) => {
+      const arr = ids();
+      const i = arr.indexOf(id);
+      const j = i + delta;
+      if (i < 0 || j < 0 || j >= arr.length) return;
+      arr.splice(j, 0, arr.splice(i, 1)[0]);
+      applyOrder(arr);
+    };
+    const applyOrder = arr => {
+      const up = {};
+      arr.forEach((id, i) => { up['items/' + id + '/order'] = i + 1; });
+      sref.update(up);
+    };
+    rail.querySelectorAll('[data-up]').forEach(b => { b.onclick = e => { e.stopPropagation(); move(b.dataset.up, -1); }; });
+    rail.querySelectorAll('[data-down]').forEach(b => { b.onclick = e => { e.stopPropagation(); move(b.dataset.down, 1); }; });
+
+    // Reordenar arrastrando (computadora)
+    let dragId = null;
+    rail.querySelectorAll('.slide').forEach(el => {
+      el.addEventListener('dragstart', e => {
+        dragId = el.dataset.id;
+        el.classList.add('dragging');
+        try { e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed = 'move'; } catch (x) {}
+      });
+      el.addEventListener('dragend', () => {
+        dragId = null;
+        rail.querySelectorAll('.slide').forEach(x => x.classList.remove('dragging', 'over'));
+      });
+      el.addEventListener('dragover', e => {
+        e.preventDefault();
+        if (dragId && el.dataset.id !== dragId) el.classList.add('over');
+      });
+      el.addEventListener('dragleave', () => el.classList.remove('over'));
+      el.addEventListener('drop', e => {
+        e.preventDefault();
+        el.classList.remove('over');
+        const from = dragId || (e.dataTransfer && e.dataTransfer.getData('text/plain'));
+        const to = el.dataset.id;
+        if (!from || from === to) return;
+        const arr = ids();
+        const i = arr.indexOf(from), j = arr.indexOf(to);
+        if (i < 0 || j < 0) return;
+        arr.splice(j, 0, arr.splice(i, 1)[0]);
+        applyOrder(arr);
+      });
     });
     rail.querySelectorAll('[data-add]').forEach(b => {
       b.onclick = () => {
@@ -927,6 +1026,117 @@ function renderHost(code) {
 const optRow = (val, i) => `<div class="opt-row">
   <input class="input" value="${esc(val)}" maxlength="90" placeholder="Opción ${i + 1}">
   <button class="btn btn-sm" data-rm="1" aria-label="Quitar opción">×</button></div>`;
+
+/* El nodo "live" es lo único que consultan los celulares del público.
+   Lo mantiene al día cualquiera de las dos pantallas del presentador. */
+function syncLive(sref, s) {
+  const live = s.live || {};
+  const pr = s.phoneResults !== false;
+  if (live.item !== s.activeItem || live.open !== (s.open !== false) || live.pr !== pr) {
+    sref.child('live').set({ item: s.activeItem, open: s.open !== false, pr: pr });
+  }
+}
+
+/* Publicador del resumen, como mucho una escritura cada segundo y medio. */
+function makePublisher(code) {
+  let t = null, lastSession = null, lastResponses = null;
+  return function (session, responses) {
+    lastSession = session; lastResponses = responses;
+    if (t) return;
+    t = setTimeout(() => {
+      t = null;
+      const s = lastSession; if (!s || s.phoneResults === false) return;
+      const item = (s.items || {})[s.activeItem]; if (!item) return;
+      db.ref('tally/' + code + '/' + s.activeItem)
+        .set(buildTally(item, lastResponses || {})).catch(() => {});
+    }, 1500);
+  };
+}
+
+/* ---------------------------------------------------------------
+   8 bis. Control remoto
+   Pantalla mínima para el teléfono del presentador: pasar preguntas,
+   ver cuántos contestaron y mirar los resultados sin darse vuelta.
+   --------------------------------------------------------------- */
+function renderRemote(code) {
+  const st = { session: null, responses: {}, seen: new Set() };
+  APP().innerHTML = topbar('', '') + '<div class="join" id="rw"><p class="muted">Cargando…</p></div>';
+  const sref = db.ref('sessions/' + code);
+  const publishSoon = makePublisher(code);
+  let rref = null, rcb = null;
+
+  on(sref, 'value', snap => {
+    if (!snap.exists()) return renderFatal('Esa sesión no existe',
+      'El código ' + code + ' no corresponde a ninguna sesión.');
+    const s = snap.val();
+    if (s.owner !== uid) return renderFatal('No sos el anfitrión de esta sesión',
+      'Entrá con el usuario con el que la creaste.');
+    const changed = !st.session || st.session.activeItem !== s.activeItem;
+    st.session = s;
+    syncLive(sref, s);
+    if (changed) { st.responses = {}; st.seen = new Set(); watch(); }
+    paint();
+  }, e => renderFatal('No se pudo leer la sesión', dbMsg(e)));
+
+  function watch() {
+    if (rref && rcb) { try { rref.off('value', rcb); } catch (e) {} }
+    const item = st.session.activeItem;
+    if (!item) return;
+    rref = db.ref('responses/' + code + '/' + item);
+    rcb = rref.on('value', snap => {
+      st.responses = snap.val() || {}; paint(); publishSoon(st.session, st.responses);
+    }, () => {});
+    listeners.push({ ref: rref, event: 'value', cb: rcb });
+  }
+
+  function go(id) { if (id) sref.child('activeItem').set(id); }
+
+  function paint() {
+    const s = st.session;
+    const list = itemsSorted(s);
+    let idx = -1;
+    list.forEach(([id], i) => { if (id === s.activeItem) idx = i; });
+    const item = (s.items || {})[s.activeItem];
+    const n = Object.keys(st.responses || {}).length;
+    const w = document.getElementById('rw');
+
+    w.innerHTML = `
+      <p class="eyebrow">${esc(s.title || '')} · ${idx + 1} de ${list.length}</p>
+      <h1 class="join-q" style="font-size:clamp(21px,5.4vw,29px);margin-bottom:16px">${esc(item ? item.question : 'Sin pregunta')}</h1>
+      <div class="btn-row" style="flex-wrap:nowrap">
+        <button class="btn btn-lg" id="prev" style="flex:1" ${idx <= 0 ? 'disabled' : ''}>← Anterior</button>
+        <button class="btn btn-primary btn-lg" id="next" style="flex:1" ${idx >= list.length - 1 ? 'disabled' : ''}>Siguiente →</button>
+      </div>
+      <div class="card" style="padding:13px 16px;margin:14px 0;display:flex;align-items:center;gap:12px">
+        <b style="font-family:var(--mono);font-size:22px">${n}</b>
+        <span class="muted" style="flex:1">${n === 1 ? 'respuesta' : 'respuestas'}</span>
+        <button class="btn btn-sm" id="topen">${s.open ? 'Cerrar' : 'Abrir'}</button>
+      </div>
+      <div class="stage" style="padding:20px 18px">
+        <p class="eyebrow" style="color:var(--muted-dark);margin:0 0 12px">Lo que se ve en la pantalla</p>
+        <div id="rres"></div>
+      </div>
+      <h3 style="font-family:var(--display);font-size:14px;margin:22px 0 10px">Ir a una pregunta</h3>
+      <div class="slides">
+        ${list.map(([id, it], i) => `
+          <button class="slide ${id === s.activeItem ? 'on' : ''}" data-jump="${id}">
+            <div class="slide-top">
+              <span class="slide-n">${i + 1}</span>
+              <span class="badge ${it.type}">${it.type === 'cloud' ? 'Nube' : 'Encuesta'}</span>
+            </div>
+            <div class="slide-q">${esc(it.question || 'Sin pregunta')}</div>
+          </button>`).join('')}
+      </div>
+      <p class="muted" style="font-size:12.5px;margin-top:18px">
+        Código de la sala: <b style="font-family:var(--mono)">${esc(code)}</b></p>`;
+
+    if (item) renderResults(document.getElementById('rres'), item, st.responses, st.seen, false);
+    document.getElementById('prev').onclick = () => go((list[idx - 1] || [])[0]);
+    document.getElementById('next').onclick = () => go((list[idx + 1] || [])[0]);
+    document.getElementById('topen').onclick = () => sref.child('open').set(!s.open);
+    w.querySelectorAll('[data-jump]').forEach(b => { b.onclick = () => go(b.dataset.jump); });
+  }
+}
 
 /* ---------------------------------------------------------------
    9. Resultados (compartido entre anfitrión y participante)
