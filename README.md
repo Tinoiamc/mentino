@@ -204,17 +204,25 @@ alcanza.
 - Proyectá el panel y usá **Presentar** para que ocupe toda la pantalla.
 - Al hacer clic en una pregunta de la lista, todos los celulares saltan a esa pregunta en pocos
   segundos.
-- Las **flechas ← →** del teclado (o las teclas AvPág/RePág de un presentador inalámbrico) pasan
-  de pregunta sin tocar el mouse.
+- **Mostrar los resultados**: el botón debajo del escenario decide cuándo se proyectan. Hasta que
+  lo toques, la pantalla muestra la pregunta (y las opciones, si es una encuesta) más el contador
+  de respuestas, pero ningún resultado. Así nadie se sesga con lo que ya votaron los demás.
+- Las **flechas ← →** del teclado, o las teclas de un presentador inalámbrico, hacen las dos cosas
+  en orden: la primera vez revelan los resultados de la pregunta actual, la segunda pasan a la
+  siguiente. Hacia atrás, igual pero al revés.
 - **Cerrar votación** frena nuevas respuestas sin borrar nada.
 
 ### Manejarlo desde el teléfono mientras la computadora proyecta
 
 En la barra lateral del panel, **Control desde el celular → Mostrar el QR de control**. Escaneá
 ese QR con tu teléfono (la primera vez te va a pedir tu usuario y contraseña) y te abre una
-pantalla chica con: la pregunta actual, *Anterior* y *Siguiente*, cuántos contestaron, el botón de
-abrir y cerrar la votación, el listado para saltar a cualquier pregunta y **los resultados en
-vivo**, así los ves sin darte vuelta.
+pantalla chica con: la pregunta actual, *Anterior* y *Siguiente*, **Mostrar los resultados**,
+cuántos contestaron, el botón de abrir y cerrar la votación, el listado para saltar a cualquier
+pregunta y **los resultados en vivo**.
+
+Esos resultados en el teléfono los ves siempre, estén proyectados o no: podés mirar cómo viene la
+votación mientras seguís hablando y recién después decidir mostrarla. Funciona igual con la
+computadora en modo *Presentar*: el proyector obedece lo que tocás en el teléfono.
 
 Lo que hagas ahí se refleja en la pantalla proyectada al instante. Ese QR es solo para vos: quien
 lo escanee sin tu contraseña no entra. El del público sigue siendo el otro, el de arriba.
@@ -244,7 +252,8 @@ Si además de esto tenés diapositivas de PowerPoint, lo más cómodo es:
 |---|---|---|
 | Palabras por participante | por pregunta | 1 a 5 casilleros por persona en las nubes. |
 | Control de groserías | por pregunta | *Rechazar*: no deja enviar. *Censurada*: asteriscos. *Sin control*: pasa tal cual. |
-| Ocultar resultados hasta responder | por pregunta | Evita el efecto arrastre. |
+| Ocultar resultados hasta responder | por pregunta | En el celular, cada uno ve los resultados recién después de enviar su respuesta. |
+| Mostrar los resultados | botón, por pregunta | Decide cuándo se proyectan y cuándo llegan a los celulares. Arranca siempre oculto. |
 | Permitir elegir varias opciones | por pregunta | Encuestas de opción múltiple. |
 | Mostrar resultados en los celulares | por sesión | Apagalo en salas grandes. |
 | Palabras bloqueadas | por sesión | Lista propia, separada por comas, que se suma al diccionario incluido. |
@@ -265,8 +274,9 @@ insultos armados con ingenio; para eso están la lista propia y el botón de bor
 - **Una respuesta por navegador**, recordada en el propio teléfono. Quien borra sus datos o entra
   desde otro dispositivo puede volver a votar.
 - **Ocultar los resultados se aplica en la interfaz.** El celular muestra la nube recién después
-  de enviar, pero el resumen viaja por un nodo de lectura pública: alguien con conocimientos
-  técnicos y el código de la sesión podría leerlo antes de contestar. Es el precio de que el
+  de enviar, y mientras no reveles nada el resumen ni siquiera se publica; pero una vez revelado
+  viaja por un nodo de lectura pública, así que alguien con conocimientos técnicos y el código
+  podría leerlo sin haber contestado. Es el precio de que el
   público no tenga que identificarse. Si te importa que nadie lo vea antes de tiempo, apagá
   *Mostrar los resultados en los celulares* y dejalos solo en la pantalla.
 - **Los resultados en los celulares dependen del panel abierto**: el resumen que leen los

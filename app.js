@@ -9,7 +9,7 @@
 /* ---------------------------------------------------------------
    1. Utilidades
    --------------------------------------------------------------- */
-const BUILD = '6';   // subilo cada vez que actualices el sitio (ver README)
+const BUILD = '7';   // subilo cada vez que actualices el sitio (ver README)
 const APP = () => document.getElementById('app');
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
   c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -334,6 +334,7 @@ function newItem(type, order) {
     type: type,
     question: type === 'cloud' ? 'En una palabra, ¿cómo llegaste hoy?' : '¿Cuál de estas opciones preferís?',
     hideResults: true,
+    shown: false,          // resultados proyectados: los revela el presentador
     filter: 'block'
   };
   if (type === 'cloud') it.maxWords = 2;
@@ -635,8 +636,15 @@ function renderHost(code) {
     else if (e.key === 'ArrowLeft' || e.key === 'PageUp') d = -1;
     else return;
     e.preventDefault();
+    // Un solo botón para todo: primero revela los resultados, después avanza.
+    const s = state.session; if (!s) return;
+    const it = (s.items || {})[s.activeItem];
+    if (it && d === 1 && it.shown !== true) return reveal(true);
+    if (it && d === -1 && it.shown === true) return reveal(false);
     step(d);
   };
+
+  function reveal(v) { sref.child('items/' + state.session.activeItem + '/shown').set(v); }
   document.addEventListener('keydown', keyHandler);
 
   function step(d) {
@@ -910,6 +918,7 @@ function renderHost(code) {
     if (!item) { stage.innerHTML = '<p class="empty">Agregá una pregunta desde el panel de la izquierda.</p>'; return; }
 
     const n = Object.keys(state.responses || {}).length;
+    const shown = item.shown === true;
     stage.innerHTML = `
       <div class="stage-head">
         <h2 class="stage-q">${esc(item.question || '')}</h2>
@@ -920,7 +929,27 @@ function renderHost(code) {
         </div>
       </div>
       <div class="stage-body" id="sbody"></div>`;
-    renderResults(document.getElementById('sbody'), item, state.responses, state.seen, true);
+    const body = document.getElementById('sbody');
+    if (shown) renderResults(body, item, state.responses, state.seen, true);
+    else renderPreview(body, item);
+
+    // Barra de control debajo del escenario (se oculta al presentar)
+    const wrap2 = document.querySelector('.stage-wrap');
+    let tools = wrap2.querySelector('.stage-tools');
+    if (!tools) {
+      const div = document.createElement('div');
+      div.className = 'stage-tools';
+      wrap2.insertBefore(div, wrap2.querySelector('.editor') || null);
+      tools = div;
+    }
+    tools.innerHTML = `
+      <button class="btn ${shown ? '' : 'btn-primary'}" id="reveal">
+        ${shown ? 'Ocultar los resultados' : 'Mostrar los resultados'}</button>
+      <span class="muted">${shown
+        ? 'La audiencia está viendo los resultados.'
+        : 'La audiencia ve la pregunta, todavía no los resultados.'}</span>`;
+    document.getElementById('reveal').onclick = () =>
+      sref.child('items/' + itemId + '/shown').set(!shown);
   }
 
   /* ---- editor ---- */
@@ -1032,8 +1061,10 @@ const optRow = (val, i) => `<div class="opt-row">
 function syncLive(sref, s) {
   const live = s.live || {};
   const pr = s.phoneResults !== false;
-  if (live.item !== s.activeItem || live.open !== (s.open !== false) || live.pr !== pr) {
-    sref.child('live').set({ item: s.activeItem, open: s.open !== false, pr: pr });
+  const item = (s.items || {})[s.activeItem] || {};
+  const sh = item.shown === true;
+  if (live.item !== s.activeItem || live.open !== (s.open !== false) || live.pr !== pr || live.sh !== sh) {
+    sref.child('live').set({ item: s.activeItem, open: s.open !== false, pr: pr, sh: sh });
   }
 }
 
@@ -1046,7 +1077,7 @@ function makePublisher(code) {
     t = setTimeout(() => {
       t = null;
       const s = lastSession; if (!s || s.phoneResults === false) return;
-      const item = (s.items || {})[s.activeItem]; if (!item) return;
+      const item = (s.items || {})[s.activeItem]; if (!item || item.shown !== true) return;
       db.ref('tally/' + code + '/' + s.activeItem)
         .set(buildTally(item, lastResponses || {})).catch(() => {});
     }, 1500);
@@ -1097,6 +1128,7 @@ function renderRemote(code) {
     let idx = -1;
     list.forEach(([id], i) => { if (id === s.activeItem) idx = i; });
     const item = (s.items || {})[s.activeItem];
+    const shown = !!(item && item.shown === true);
     const n = Object.keys(st.responses || {}).length;
     const w = document.getElementById('rw');
 
@@ -1107,13 +1139,16 @@ function renderRemote(code) {
         <button class="btn btn-lg" id="prev" style="flex:1" ${idx <= 0 ? 'disabled' : ''}>← Anterior</button>
         <button class="btn btn-primary btn-lg" id="next" style="flex:1" ${idx >= list.length - 1 ? 'disabled' : ''}>Siguiente →</button>
       </div>
-      <div class="card" style="padding:13px 16px;margin:14px 0;display:flex;align-items:center;gap:12px">
+      <button class="btn ${shown ? '' : 'btn-primary'} btn-lg" id="reveal" style="width:100%;margin-top:12px">
+        ${shown ? 'Ocultar los resultados' : 'Mostrar los resultados en pantalla'}</button>
+      <div class="card" style="padding:13px 16px;margin:12px 0;display:flex;align-items:center;gap:12px">
         <b style="font-family:var(--mono);font-size:22px">${n}</b>
         <span class="muted" style="flex:1">${n === 1 ? 'respuesta' : 'respuestas'}</span>
         <button class="btn btn-sm" id="topen">${s.open ? 'Cerrar' : 'Abrir'}</button>
       </div>
       <div class="stage" style="padding:20px 18px">
-        <p class="eyebrow" style="color:var(--muted-dark);margin:0 0 12px">Lo que se ve en la pantalla</p>
+        <p class="eyebrow" style="color:var(--muted-dark);margin:0 0 12px">
+          ${shown ? 'Esto se ve en la pantalla' : 'Solo lo ves vos, todavía no está proyectado'}</p>
         <div id="rres"></div>
       </div>
       <h3 style="font-family:var(--display);font-size:14px;margin:22px 0 10px">Ir a una pregunta</h3>
@@ -1134,6 +1169,8 @@ function renderRemote(code) {
     document.getElementById('prev').onclick = () => go((list[idx - 1] || [])[0]);
     document.getElementById('next').onclick = () => go((list[idx + 1] || [])[0]);
     document.getElementById('topen').onclick = () => sref.child('open').set(!s.open);
+    document.getElementById('reveal').onclick = () =>
+      sref.child('items/' + s.activeItem + '/shown').set(!shown);
     w.querySelectorAll('[data-jump]').forEach(b => { b.onclick = () => go(b.dataset.jump); });
   }
 }
@@ -1172,6 +1209,20 @@ function aggregatePoll(responses, options) {
 }
 
 const PALETTE = ['var(--w1)', 'var(--w2)', 'var(--w3)', 'var(--w4)', 'var(--w5)', 'var(--w6)'];
+
+/* Mientras los resultados están ocultos: se ve la pregunta y, en las encuestas,
+   las opciones posibles. Nada que sesgue a quien todavía no contestó. */
+function renderPreview(el, item) {
+  if (!el) return;
+  if (item.type === 'poll') {
+    el.innerHTML = '<div class="opt-preview">' + (item.options || []).map((o, i) =>
+      `<div class="opt-line"><span class="opt-dot" style="background:${PALETTE[i % PALETTE.length]}"></span>${esc(o)}</div>`
+    ).join('') + '</div>';
+  } else {
+    el.innerHTML = `<p class="empty">Escriban su respuesta en el teléfono.<br>
+      <span class="waiting" style="margin-top:12px"><i></i> recibiendo respuestas</span></p>`;
+  }
+}
 
 function renderResults(el, item, responses, seen, big) {
   if (!el) return;
@@ -1255,7 +1306,7 @@ function renderTally(el, tally, seen) {
 }
 
 function renderJoin(code) {
-  const st = { s: null, itemId: null, item: null, answered: false, tally: null, seen: new Set() };
+  const st = { s: null, itemId: null, item: null, answered: false, tally: null, seen: new Set(), shown: false };
   const pid = participantId();
   APP().innerHTML = topbar('', '') + `<div class="join" id="jw"><p class="muted">Cargando…</p></div>`;
 
@@ -1267,6 +1318,7 @@ function renderJoin(code) {
     catch (e) { return fail('No pudimos conectarnos. Revisá tu conexión y volvé a intentar.'); }
     if (!s) return fail('No encontramos ninguna sesión con el código ' + code + '. Revisalo con quien está presentando.');
     st.s = s;
+    st.shown = ((s.items || {})[s.activeItem] || {}).shown === true;
     setItem(s.activeItem, (s.items || {})[s.activeItem]);
     poll();
   }
@@ -1278,12 +1330,14 @@ function renderJoin(code) {
 
   function setItem(id, item) {
     st.itemId = id; st.item = item || null; st.tally = null; st.seen = new Set();
+    st.shown = !!(item && item.shown === true);
     st.answered = store.get('sala:' + code + ':' + id) === '1';
     paint();
     if (canSee()) refreshTally();
   }
 
-  const canSee = () => !!st.item && st.s.phoneResults !== false && (!st.item.hideResults || st.answered);
+  const canSee = () => !!st.item && st.s.phoneResults !== false && st.shown === true &&
+                       (!st.item.hideResults || st.answered);
 
   /* Consulta un nodo de pocos bytes para seguir la pregunta activa.
      El intervalo lleva una variación al azar para que 400 celulares no
@@ -1294,8 +1348,11 @@ function renderJoin(code) {
         const live = await restGet('sessions/' + code + '/live');
         if (!live) return;
         const pr = live.pr !== false;
-        if (live.open !== st.s.open || pr !== (st.s.phoneResults !== false)) {
-          st.s.open = live.open; st.s.phoneResults = pr; paint();
+        const sh = live.sh === true;
+        if (live.open !== st.s.open || pr !== (st.s.phoneResults !== false) || sh !== st.shown) {
+          st.s.open = live.open; st.s.phoneResults = pr; st.shown = sh;
+          paint();
+          if (canSee()) refreshTally();
         }
         if (live.item && live.item !== st.itemId) {
           const it = await restGet('sessions/' + code + '/items/' + live.item);
@@ -1339,6 +1396,8 @@ function renderJoin(code) {
       if (st.answered) html += `<div class="notice">Los resultados están en la pantalla grande.</div>`;
     } else if (!st.answered) {
       html += `<div class="notice">Los resultados se muestran cuando envíes tu respuesta.</div>`;
+    } else if (!st.shown) {
+      html += `<div class="notice">Los resultados se muestran en un momento.</div>`;
     }
     w.innerHTML = html;
 
