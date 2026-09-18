@@ -9,10 +9,55 @@
 /* ---------------------------------------------------------------
    1. Utilidades
    --------------------------------------------------------------- */
-const BUILD = '7';   // subilo cada vez que actualices el sitio (ver README)
+const BUILD = '8';   // subilo cada vez que actualices el sitio (ver README)
 const APP = () => document.getElementById('app');
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
   c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+/* Texto de la pregunta sin tope de caracteres: se limpia el espacio sobrante
+   pero se respetan los saltos de línea que haya escrito el presentador. */
+const cleanQuestion = s => String(s == null ? '' : s)
+  .replace(/\r\n?/g, '\n')
+  .split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).join('\n')
+  .replace(/\n{3,}/g, '\n\n').trim();
+
+/* Los campos de texto crecen con lo que se escribe, en lugar de cortar. */
+function autoGrow(el) {
+  if (!el) return;
+  const fit = () => { el.style.height = 'auto'; el.style.height = (el.scrollHeight + 2) + 'px'; };
+  el.addEventListener('input', fit);
+  fit();
+}
+function wireAutoGrow(root) {
+  (root || document).querySelectorAll('textarea.ta-auto').forEach(autoGrow);
+}
+
+/* Achica la tipografía de un bloque hasta que entre en la cantidad de líneas
+   pedida. Así una pregunta larga se acomoda a la pantalla en lugar de
+   desbordarla, y una corta se sigue viendo grande. */
+function fitBlock(el, minPx, maxLines) {
+  if (!el) return;
+  el.style.fontSize = '';                       // vuelve al tamaño del CSS
+  let size = parseFloat(getComputedStyle(el).fontSize) || 24;
+  const min = minPx || 16;
+  for (let i = 0; i < 40; i++) {
+    const cs = getComputedStyle(el);
+    const lh = parseFloat(cs.lineHeight) || size * 1.1;
+    if (el.scrollHeight <= lh * maxLines + 2 || size <= min) break;
+    size = Math.max(min, size * 0.92);
+    el.style.fontSize = size.toFixed(1) + 'px';
+  }
+}
+function refitQuestions() {
+  const present = document.body.classList.contains('present');
+  document.querySelectorAll('.stage-q').forEach(el => fitBlock(el, present ? 26 : 20, 6));
+  document.querySelectorAll('.join-q').forEach(el => fitBlock(el, 18, 7));
+}
+let refitTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(refitTimer);
+  refitTimer = setTimeout(refitQuestions, 120);
+});
 
 let toastTimer = null;
 function toast(msg) {
@@ -513,7 +558,7 @@ function renderHome() {
         <h3>Crear una sesión</h3>
         <div class="field">
           <label for="ttl">Nombre de la sesión</label>
-          <input class="input" id="ttl" placeholder="Taller de inducción · martes" maxlength="80">
+          <input class="input" id="ttl" placeholder="Taller de inducción · martes">
         </div>
         <button class="btn btn-primary btn-lg" id="go">Crear sesión</button>
         <ol class="steps">
@@ -621,7 +666,9 @@ function renderHost(code) {
   APP().innerHTML = topbar('', '') + `<div class="host"><div class="rail"></div>
     <div class="stage-wrap"><div class="stage"><p class="empty">Cargando…</p></div></div></div>
     <button class="btn exit-present" id="exitPres">Salir de presentación</button>`;
-  document.getElementById('exitPres').onclick = () => document.body.classList.remove('present');
+  document.getElementById('exitPres').onclick = () => {
+    document.body.classList.remove('present'); refitQuestions();
+  };
 
   const sref = db.ref('sessions/' + code);
 
@@ -697,7 +744,7 @@ function renderHost(code) {
     if (!tb.dataset.ready) {
       tb.dataset.ready = '1';
       tb.innerHTML = `<a class="brand" href="#"><span class="dots"><i></i><i></i><i></i></span>${esc(NAME)}</a>
-        <input class="topbar-title" id="ttl" value="${esc(s.title)}" maxlength="80" aria-label="Nombre de la sesión">
+        <input class="topbar-title" id="ttl" value="${esc(s.title)}" aria-label="Nombre de la sesión">
         <span class="spacer"></span>
         <button class="btn btn-sm" id="bOpen"></button>
         <button class="btn btn-sm" id="bPres">Presentar</button>
@@ -709,7 +756,9 @@ function renderHost(code) {
         sref.child('title').set(v);
         db.ref('mine/' + uid + '/' + code + '/title').set(v).catch(() => {});
       };
-      document.getElementById('bPres').onclick = () => document.body.classList.add('present');
+      document.getElementById('bPres').onclick = () => {
+        document.body.classList.add('present'); refitQuestions();
+      };
       document.getElementById('bOpen').onclick = () => sref.child('open').set(!state.session.open);
       document.getElementById('bExp').onclick = () => openExport(code, state.session);
       document.getElementById('bOut').onclick = signOut;
@@ -932,6 +981,7 @@ function renderHost(code) {
     const body = document.getElementById('sbody');
     if (shown) renderResults(body, item, state.responses, state.seen, true);
     else renderPreview(body, item);
+    refitQuestions();   // la pregunta se adapta al espacio, largo el que sea
 
     // Barra de control debajo del escenario (se oculta al presentar)
     const wrap2 = document.querySelector('.stage-wrap');
@@ -972,7 +1022,9 @@ function renderHost(code) {
       </div>
       <div class="field">
         <label for="eQ">Pregunta</label>
-        <input class="input" id="eQ" value="${esc(item.question || '')}" maxlength="160">
+        <textarea class="input ta-auto" id="eQ" rows="2"
+          placeholder="Escribí la pregunta, del largo que necesites">${esc(item.question || '')}</textarea>
+        <p class="muted" style="font-size:12px;margin:5px 0 0">Sin límite de caracteres. Enter hace un salto de línea; Ctrl+Enter guarda.</p>
       </div>
       ${isCloud ? `
       <div class="two-col">
@@ -1016,18 +1068,25 @@ function renderHost(code) {
         if (box.children.length >= 10) return toast('Máximo diez opciones');
         box.insertAdjacentHTML('beforeend', optRow('', box.children.length));
         wire();
+        wireAutoGrow(box);
       };
     }
 
+    wireAutoGrow(ed);
+    const qBox = document.getElementById('eQ');
+    qBox.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); document.getElementById('eSave').click(); }
+    });
+
     document.getElementById('eSave').onclick = () => {
-      const up = { question: (document.getElementById('eQ').value || '').trim() || 'Sin pregunta',
+      const up = { question: cleanQuestion(document.getElementById('eQ').value) || 'Sin pregunta',
                    hideResults: document.getElementById('eHide').checked };
       if (isCloud) {
         up.maxWords = parseInt(document.getElementById('eMax').value, 10);
         up.filter = document.getElementById('eFil').value;
       } else {
         const opts = Array.from(document.querySelectorAll('#eOpts .input'))
-          .map(i => i.value.trim()).filter(Boolean);
+          .map(i => i.value.replace(/\s+/g, ' ').trim()).filter(Boolean);
         if (opts.length < 2) return toast('Tiene que haber al menos dos opciones');
         up.options = opts;
         up.multi = document.getElementById('eMulti').checked;
@@ -1053,7 +1112,7 @@ function renderHost(code) {
 }
 
 const optRow = (val, i) => `<div class="opt-row">
-  <input class="input" value="${esc(val)}" maxlength="90" placeholder="Opción ${i + 1}">
+  <textarea class="input ta-auto opt-text" rows="1" placeholder="Opción ${i + 1}">${esc(val)}</textarea>
   <button class="btn btn-sm" data-rm="1" aria-label="Quitar opción">×</button></div>`;
 
 /* El nodo "live" es lo único que consultan los celulares del público.
@@ -1134,7 +1193,7 @@ function renderRemote(code) {
 
     w.innerHTML = `
       <p class="eyebrow">${esc(s.title || '')} · ${idx + 1} de ${list.length}</p>
-      <h1 class="join-q" style="font-size:clamp(21px,5.4vw,29px);margin-bottom:16px">${esc(item ? item.question : 'Sin pregunta')}</h1>
+      <h1 class="join-q sm" style="margin-bottom:16px">${esc(item ? item.question : 'Sin pregunta')}</h1>
       <div class="btn-row" style="flex-wrap:nowrap">
         <button class="btn btn-lg" id="prev" style="flex:1" ${idx <= 0 ? 'disabled' : ''}>← Anterior</button>
         <button class="btn btn-primary btn-lg" id="next" style="flex:1" ${idx >= list.length - 1 ? 'disabled' : ''}>Siguiente →</button>
@@ -1169,6 +1228,7 @@ function renderRemote(code) {
     document.getElementById('prev').onclick = () => go((list[idx - 1] || [])[0]);
     document.getElementById('next').onclick = () => go((list[idx + 1] || [])[0]);
     document.getElementById('topen').onclick = () => sref.child('open').set(!s.open);
+    refitQuestions();
     document.getElementById('reveal').onclick = () =>
       sref.child('items/' + s.activeItem + '/shown').set(!shown);
     w.querySelectorAll('[data-jump]').forEach(b => { b.onclick = () => go(b.dataset.jump); });
@@ -1401,6 +1461,7 @@ function renderJoin(code) {
     }
     w.innerHTML = html;
 
+    refitQuestions();
     if (canSee() && st.tally) renderTally(document.getElementById('jres'), st.tally, st.seen);
     const again = document.getElementById('again');
     if (again) again.onclick = () => { st.answered = false; paint(); };
@@ -1474,7 +1535,11 @@ function renderJoin(code) {
         if (!picked.size) { err.innerHTML = '<div class="notice bad">Elegí una opción para poder enviar.</div>'; return; }
         const arr = Array.from(picked).sort((a, b) => a - b);
         payload.choices = arr;
-        payload.labels = arr.map(i => (item.options || [])[i] || '');
+        // El texto de la opción viaja solo si entra en el límite de las reglas
+        // de Firebase (90). Si alguna es más larga, se manda solo el número de
+        // opción: la exportación reconstruye el texto desde la pregunta.
+        const labels = arr.map(i => (item.options || [])[i] || '');
+        if (labels.every(l => l.length <= 90)) payload.labels = labels;
       }
 
       send.disabled = true; send.textContent = 'Enviando…';

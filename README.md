@@ -196,6 +196,12 @@ alcanza.
 1. Entrá a tu sitio y hacé clic en **Crear sesión**.
 2. Escribí la primera pregunta. Con **+ Nube** y **+ Encuesta** agregás las siguientes. Las
    preguntas se reordenan **arrastrándolas** en la lista, o con las flechas ↑ ↓ de cada una.
+
+   El enunciado no tiene tope de caracteres: el campo crece mientras escribís y **Enter** hace un
+   salto de línea (para guardar sin soltar el teclado, **Ctrl+Enter**). En la pantalla proyectada y
+   en el celular del público la tipografía se achica sola hasta que la pregunta entra completa, así
+   que una consigna larga se acomoda al espacio en lugar de recortarse. Lo mismo vale para las
+   opciones de una encuesta y para el nombre de la sesión.
 3. Guardá el link del panel (el que termina en `#/host/ABC123`) en los favoritos: es el único
    modo de volver a entrar, y solo funciona desde el mismo navegador con el que la creaste.
 
@@ -285,6 +291,12 @@ insultos armados con ingenio; para eso están la lista propia y el botón de bor
 - **Editar opciones con votos ya emitidos** desplaza los conteos. Mejor borrar las respuestas de
   esa pregunta después de editarla.
 - Hasta 60 palabras visibles por nube y 10 opciones por encuesta.
+- **Las preguntas y las opciones no tienen tope de largo**, pero conviene la mesura: a partir de
+  unos 350 caracteres la tipografía ya llegó a su tamaño mínimo y el texto sigue creciendo hacia
+  abajo, así que en el proyector ocupa buena parte de la pantalla. Las respuestas del público
+  siguen limitadas a 40 caracteres por palabra, que es lo que validan las reglas de Firebase.
+- Si una opción de encuesta supera los 90 caracteres, la respuesta viaja con el número de opción y
+  no con su texto; la exportación lo reconstruye igual desde la pregunta.
 
 ## Archivos
 

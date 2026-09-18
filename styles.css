@@ -94,6 +94,10 @@ button{font-family:inherit}
 }
 .input:focus,.select:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:var(--accent)}
 textarea.input{resize:vertical;min-height:70px}
+/* campos que crecen solos con el texto: sin tope, sin barra de scroll */
+textarea.ta-auto{resize:none;overflow:hidden;min-height:0;line-height:1.4}
+#eQ.ta-auto{min-height:52px}
+.opt-row textarea.ta-auto{min-height:44px}
 .field{margin-bottom:14px}
 .field label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--muted)}
 .check{display:flex;align-items:flex-start;gap:10px;font-size:14px;margin-bottom:11px;cursor:pointer}
@@ -152,7 +156,7 @@ textarea.input{resize:vertical;min-height:70px}
 .slide-top{display:flex;align-items:center;gap:7px;margin-bottom:5px}
 .slide-n{font-family:var(--mono);font-size:11px;color:var(--muted)}
 .slide.on .slide-n{color:var(--muted-dark)}
-.slide-q{font-size:13.5px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.slide-q{font-size:13.5px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;white-space:pre-wrap;overflow-wrap:anywhere}
 .grip{color:var(--muted);font-size:13px;cursor:grab;line-height:1;letter-spacing:-1px}
 .slide.on .grip{color:var(--muted-dark)}
 .slide{user-select:none}
@@ -209,7 +213,8 @@ textarea.input{resize:vertical;min-height:70px}
 .stage-head{display:flex;align-items:flex-start;gap:16px;margin-bottom:26px}
 .stage-q{
   font-family:var(--display);font-weight:700;letter-spacing:-.025em;line-height:1.08;
-  font-size:clamp(26px,3.4vw,44px);margin:0;flex:1;
+  font-size:clamp(26px,3.4vw,44px);margin:0;flex:1;min-width:0;
+  white-space:pre-wrap;overflow-wrap:anywhere;
 }
 .stage-meta{font-family:var(--mono);font-size:12px;color:var(--muted-dark);text-align:right;flex:none;line-height:1.7}
 .stage-body{flex:1;display:flex;align-items:center;justify-content:center}
@@ -230,7 +235,7 @@ textarea.input{resize:vertical;min-height:70px}
 .opt-line{
   display:flex;align-items:center;gap:14px;
   font-family:var(--display);font-weight:600;letter-spacing:-.01em;
-  font-size:clamp(17px,1.9vw,26px);
+  font-size:clamp(17px,1.9vw,26px);overflow-wrap:anywhere;
 }
 .opt-dot{width:12px;height:12px;border-radius:50%;flex:none}
 .waiting{
@@ -244,7 +249,7 @@ textarea.input{resize:vertical;min-height:70px}
 /* barras */
 .bars{width:100%;display:flex;flex-direction:column;gap:16px}
 .bar-row .bar-top{display:flex;justify-content:space-between;align-items:baseline;gap:14px;margin-bottom:7px}
-.bar-label{font-family:var(--display);font-weight:600;font-size:clamp(16px,1.7vw,23px);letter-spacing:-.01em}
+.bar-label{font-family:var(--display);font-weight:600;font-size:clamp(16px,1.7vw,23px);letter-spacing:-.01em;min-width:0;overflow-wrap:anywhere}
 .bar-num{font-family:var(--mono);font-size:clamp(14px,1.5vw,20px);color:var(--spot);font-weight:600;flex:none}
 .bar-num small{color:var(--muted-dark);font-weight:500;margin-left:6px}
 .bar-track{height:13px;background:var(--ink-3);border-radius:7px;overflow:hidden}
@@ -254,8 +259,9 @@ textarea.input{resize:vertical;min-height:70px}
 .editor{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px}
 .editor-head{display:flex;align-items:center;gap:10px;margin-bottom:16px}
 .editor-head h3{margin:0;flex:1;font-family:var(--display);font-size:15px}
-.opt-row{display:flex;gap:8px;margin-bottom:8px;align-items:center}
-.opt-row .input{flex:1}
+.opt-row{display:flex;gap:8px;margin-bottom:8px;align-items:flex-start}
+.opt-row .input{flex:1;min-width:0}
+.opt-row .btn{margin-top:4px}
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 
 /* ---------- vista participante ---------- */
@@ -263,13 +269,16 @@ textarea.input{resize:vertical;min-height:70px}
 .join-q{
   font-family:var(--display);font-weight:700;letter-spacing:-.03em;line-height:1.06;
   font-size:clamp(28px,6vw,40px);margin:8px 0 22px;
+  white-space:pre-wrap;overflow-wrap:anywhere;
 }
+.join-q.sm{font-size:clamp(21px,5.4vw,29px)}
 .join .stage{min-height:auto;border-radius:16px;padding:24px}
 .join .stage-q{font-size:clamp(20px,4.5vw,26px)}
 .choice{
   display:block;width:100%;text-align:left;border:1.5px solid var(--line);background:var(--card);
   border-radius:12px;padding:16px 18px;font-size:17px;margin-bottom:10px;cursor:pointer;
   display:flex;align-items:center;gap:13px;transition:border-color .12s,background .12s;
+  overflow-wrap:anywhere;line-height:1.35;
 }
 .choice:hover{border-color:#B9BEd0}
 .choice.on{border-color:var(--accent);background:var(--accent-soft)}
