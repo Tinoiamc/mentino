@@ -504,7 +504,7 @@ function renderHome() {
   <div class="home">
     <div class="home-hero">
       <p class="eyebrow">Nubes de palabras y encuestas en vivo</p>
-      <h1>Preguntá desde el escenario. <em>Contestan desde el bolsillo.</em></h1>
+      <h1>Preguntá desde el escenario. <em>Contestan desde la tribuna.</em></h1>
       <p>Creás la pregunta, mostrás el QR, y las respuestas aparecen en la pantalla a medida que llegan.
          El público no se registra ni deja ningún dato: escanea y contesta.</p>
     </div>
