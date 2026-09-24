@@ -336,14 +336,15 @@ function paintAcct() {
   const el = document.getElementById('acct');
   if (!el) return;
   const u = firebase.auth().currentUser;
-  if (u && !u.isAnonymous) {
-    el.innerHTML = `<span class="muted" style="font-size:13px">${esc(u.displayName || u.email || '')}</span>`;
-  } else {
-    el.innerHTML = `<button class="btn btn-sm" id="gg">Entrar con Google</button>`;
-    document.getElementById('gg').onclick = () =>
-      signInGoogle().then(() => { paintAcct(); loadMine(); toast('Listo: abrís tus paneles desde cualquier dispositivo'); })
-                    .catch(() => toast('No se pudo entrar con Google'));
-  }
+  if (!u) { el.innerHTML = ''; return; }
+  /* El usuario del panel es "tino@sala.local": mostramos solo el nombre. */
+  const dom = '@' + (window.LOGIN_DOMAIN || 'sala.local');
+  const mail = u.email || '';
+  const quien = mail.slice(-dom.length) === dom ? mail.slice(0, -dom.length) : (u.displayName || mail);
+  el.innerHTML = `<span class="muted" style="font-size:13px;margin-right:8px">${esc(quien)}</span>
+    <button class="btn btn-sm" id="qout">Salir</button>`;
+  document.getElementById('qout').onclick = () =>
+    firebase.auth().signOut().then(() => location.reload());
 }
 
 function loadMine() {
@@ -645,6 +646,7 @@ function renderHostQuiz(code) {
         </div>
         <div class="btn-row">
           <button class="btn btn-sm" id="add">+ Pregunta</button>
+          <button class="btn btn-sm" id="tplBtn">Cargar plantilla</button>
         </div>
       </section>
       <section>
@@ -698,6 +700,34 @@ function renderHostQuiz(code) {
       up['i'] = list.length;
       qref.update(up).then(() => db.ref('qsec/' + code + '/' + qid).set(0));
     };
+    /* Cargar una tanda de preguntas escrita afuera. La respuesta correcta
+       viaja aparte, al nodo que solo lee el anfitrión, igual que cuando se
+       carga a mano. Todo se agrega al final; no se borra nada. */
+    document.getElementById('tplBtn').onclick = () => {
+      if (!window.TPL) return toast('No se cargó app.js');
+      if (S.quiz.state !== 'lobby') return toast('Volvé a la sala de espera para cargar preguntas');
+      window.TPL.open({
+        mode: 'comp',
+        defaultSecs: S.quiz.secs || DEF_SECS,
+        onImport: blocks => {
+          const prev = itemsSorted(S.quiz);
+          let order = prev.length ? (prev[prev.length - 1][1].order || prev.length) : 0;
+          const up = {}, sec = {};
+          blocks.forEach((b, i) => {
+            const qid = 'k' + (Date.now() + i).toString(36);
+            up['items/' + qid] = {
+              order: ++order,
+              question: b.question,
+              options: b.options.slice(0, 6),
+              secs: b.secs || S.quiz.secs || DEF_SECS
+            };
+            sec[qid] = b.correct;
+          });
+          return qref.update(up).then(() => db.ref('qsec/' + code).update(sec));
+        }
+      });
+    };
+
     const gs = document.getElementById('gsec');
     gs.onchange = () => qref.child('secs').set(Math.max(5, Math.min(120, parseInt(gs.value, 10) || DEF_SECS)));
     const gb = document.getElementById('gbase');

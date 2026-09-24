@@ -24,6 +24,11 @@
 
   --w1:#38BDF8; --w2:#2FD39B; --w3:#60A5FA; --w4:#22D3EE; --w5:#7CE38B; --w6:#2AB5B0;
 
+  /* Las usa el modo competitivo (quiz.css): realce sobre fondo oscuro y
+     degradado del reloj y las barras. */
+  --spark:#2FD39B;
+  --grad:linear-gradient(100deg,#1668C4 0%,#2AB5B0 52%,#2FD39B 100%);
+
   --display:"Bricolage Grotesque","Bricolage Grotesque Fallback",system-ui,sans-serif;
   --body:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -114,6 +119,7 @@ textarea.ta-auto{resize:none;overflow:hidden;min-height:0;line-height:1.4}
 }
 .badge.cloud{background:#D9F6EB;color:#0C6F4E}
 .badge.poll{background:#DDEBFA;color:#134F87}
+.badge.warn{background:#FBEFD9;color:#8A5A12}
 
 /* ---------- portada ---------- */
 .home{max-width:1000px;margin:0 auto;padding:56px 22px 80px;width:100%}
@@ -329,6 +335,49 @@ body.present .exit-present{display:inline-flex}
 .split{display:flex;gap:10px;align-items:center}
 .split .input{flex:1}
 .list-clean{margin:0;padding-left:18px;font-size:14px;color:var(--muted);line-height:1.7}
+
+/* ---------- cuadro para cargar una plantilla ---------- */
+.sheet{
+  position:fixed;inset:0;z-index:60;background:rgba(18,20,31,.55);
+  display:flex;align-items:center;justify-content:center;padding:22px;
+}
+.sheet-box{
+  background:var(--card);border-radius:var(--r);border:1px solid var(--line);
+  width:min(760px,100%);max-height:min(88vh,900px);display:flex;flex-direction:column;
+  box-shadow:0 24px 60px rgba(18,20,31,.28);
+}
+.sheet-head{
+  display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line);
+}
+.sheet-head h3{font-family:var(--display);font-size:17px;margin:0;flex:1;letter-spacing:-.01em}
+.sheet-body{padding:18px 20px;overflow:auto;flex:1}
+.sheet-foot{
+  display:flex;align-items:center;gap:9px;padding:14px 20px;border-top:1px solid var(--line);flex-wrap:wrap;
+}
+.sheet-foot .spacer{flex:1}
+textarea.tpl-ta{
+  width:100%;min-height:210px;font-family:var(--mono);font-size:13px;line-height:1.6;
+  white-space:pre;overflow-wrap:normal;overflow-x:auto;
+}
+.tpl-out{margin-top:12px}
+.tpl-out .notice{margin:0}
+.tpl-list{margin:10px 0 0;padding-left:20px;font-size:13.5px;line-height:1.5}
+.tpl-list li{margin-bottom:7px}
+/* .badge.cloud comparte nombre con el contenedor de la nube, que ocupa todo
+   el ancho: acá la etiqueta tiene que quedar chica y en la misma línea. */
+.tpl-list .badge{display:inline-flex;width:auto;margin-right:6px;vertical-align:1px}
+.tpl-list small{display:block;color:var(--muted);font-size:12px;margin-top:2px;overflow-wrap:anywhere}
+.tpl-help{margin-top:14px;font-size:13.5px}
+.tpl-help summary{cursor:pointer;color:var(--accent);font-weight:600}
+.tpl-help ul{margin:10px 0 0;padding-left:18px;line-height:1.65;color:var(--muted)}
+.tpl-help code{
+  font-family:var(--mono);font-size:12px;background:var(--paper);
+  border:1px solid var(--line);border-radius:5px;padding:1px 4px;color:var(--text);
+}
+@media (max-width:700px){
+  .sheet{padding:0;align-items:stretch}
+  .sheet-box{max-height:100vh;border-radius:0;border:none;width:100%}
+}
 
 @media (max-width:900px){
   .host{grid-template-columns:1fr}

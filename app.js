@@ -9,7 +9,7 @@
 /* ---------------------------------------------------------------
    1. Utilidades
    --------------------------------------------------------------- */
-const BUILD = '8';   // subilo cada vez que actualices el sitio (ver README)
+const BUILD = '9';   // subilo cada vez que actualices el sitio (ver README)
 const APP = () => document.getElementById('app');
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
   c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -107,6 +107,11 @@ async function restPut(path, body) {
 
 const timers = [];
 function clearTimers() { while (timers.length) clearInterval(timers.pop()); }
+
+/* Igual que los intervalos, pero para los temporizadores de una sola vez
+   que usa el modo competitivo (el cierre automático de cada pregunta). */
+const waits = [];
+function clearWaits() { while (waits.length) clearTimeout(waits.pop()); }
 
 let keyHandler = null;   // atajos de teclado del panel
 
@@ -237,6 +242,7 @@ const listeners = [];   // { ref, event, cb }
 
 function detachAll() {
   clearTimers();
+  clearWaits();
   if (keyHandler) { document.removeEventListener('keydown', keyHandler); keyHandler = null; }
   while (listeners.length) {
     const l = listeners.pop();
@@ -369,6 +375,50 @@ function boot() {
 }
 
 /* ---------------------------------------------------------------
+   3 bis. Puente con el modo competitivo (quiz.js)
+
+   quiz.js no inicializa Firebase, no escucha la dirección y no maneja el
+   ingreso: usa la conexión, la identidad y la limpieza de pantalla que ya
+   montó este archivo. Todo lo que ese módulo necesita pasa por acá, así
+   hay una sola conexión abierta y una sola forma de entrar.
+   --------------------------------------------------------------- */
+window.ENC = {
+  db: () => db,
+  uid: () => uid,
+  dbu: () => DBU,
+  on: on,
+  timer: id => { timers.push(id); return id; },
+  wait: id => { waits.push(id); return id; },
+  navKeys: fn => {
+    if (keyHandler) document.removeEventListener('keydown', keyHandler);
+    keyHandler = fn || null;
+    if (keyHandler) document.addEventListener('keydown', keyHandler);
+  },
+  stop: detachAll,
+  dbMsg: dbMsg,
+  randomCode: randomCode,
+  /* Quien entra con un código no sabe si es de una encuesta o de una
+     competencia: entra a las dos por la misma dirección. Por eso un código
+     nuevo no puede chocar con ninguno de los dos lados. */
+  freeCode: async function (n) {
+    for (let i = 0; i < 8; i++) {
+      const c = randomCode(n || 6);
+      const a = await db.ref('sessions/' + c + '/owner').get();
+      if (a.exists()) continue;
+      const b = await db.ref('quizzes/' + c + '/owner').get();
+      if (!b.exists()) return c;
+    }
+    throw new Error('No pudimos generar un código libre. Probá otra vez.');
+  },
+  /* El ingreso ya lo resolvió route() antes de abrir cualquier pantalla del
+     anfitrión, así que acá no hay nada más que esperar. */
+  ensureAuth: () => Promise.resolve(uid),
+  ensureHost: () => Promise.resolve(!!uid),
+  isAdmin: () => !!uid,
+  signInGoogle: () => Promise.reject(new Error('Esta versión entra con usuario y contraseña'))
+};
+
+/* ---------------------------------------------------------------
    4. Modelo de datos
    sessions/{code} = { owner, createdAt, title, open, activeItem, banned, items:{ id:{...} } }
    responses/{code}/{itemId}/{uid} = { ts, words:[] } | { ts, choices:[], labels:[] }
@@ -384,6 +434,22 @@ function newItem(type, order) {
   };
   if (type === 'cloud') it.maxWords = 2;
   else { it.options = ['Opción A', 'Opción B', 'Opción C']; it.multi = false; }
+  return it;
+}
+
+/* Una pregunta de la plantilla, convertida en pregunta de la sesión.
+   Lo que la plantilla no dice queda como en una pregunta recién creada. */
+function itemFromBlock(b, order) {
+  const it = {
+    order: order,
+    type: b.type === 'cloud' ? 'cloud' : 'poll',
+    question: b.question,
+    hideResults: b.hideResults === null || b.hideResults === undefined ? true : !!b.hideResults,
+    shown: false,
+    filter: b.filter || 'block'
+  };
+  if (it.type === 'cloud') it.maxWords = b.maxWords || 1;
+  else { it.options = b.options.slice(0, 10); it.multi = !!b.multi; }
   return it;
 }
 
@@ -466,6 +532,327 @@ function deleteSession(code) {
 }
 
 /* ---------------------------------------------------------------
+   4 bis. Plantillas de preguntas
+
+   Un texto que se escribe en el Bloc de notas, en Word o donde sea, y se
+   pega acá o se carga como archivo .txt. El formato es deliberadamente
+   flojo, porque lo va a escribir gente que no programa:
+
+     - una línea suelta es una pregunta;
+     - las líneas que empiezan con guión son sus opciones;
+     - un asterisco marca la correcta (solo lo mira el modo competitivo);
+     - "clave: valor" ajusta esa pregunta (palabras, filtro, múltiple,
+       segundos, ocultar);
+     - las líneas que empiezan con # son comentarios.
+
+   Si una pregunta no trae opciones, es una nube de palabras. Si las trae,
+   es una encuesta. El prefijo NUBE: o ENCUESTA: manda por encima de eso.
+   El mismo archivo sirve para los dos modos: en las encuestas la marca de
+   respuesta correcta se ignora, y en el competitivo se exige.
+   --------------------------------------------------------------- */
+const TPL_TYPES = {
+  nube: 'cloud', nubedepalabras: 'cloud', palabras: 'cloud',
+  encuesta: 'poll', votacion: 'poll', opciones: 'poll',
+  pregunta: 'poll', competencia: 'poll', trivia: 'poll'
+};
+const TPL_FILTERS = {
+  rechazar: 'block', bloquear: 'block', block: 'block', rechazada: 'block',
+  censurar: 'censor', censurada: 'censor', censor: 'censor', asteriscos: 'censor',
+  libre: 'off', off: 'off', ninguno: 'off', sincontrol: 'off', no: 'off'
+};
+const TPL_YES = ['si', 'sí', 'yes', 'true', '1', 'x', 'ok', 'activado'];
+const tplKey = s => normalize(s).replace(/\s+/g, '');
+const tplYes = v => TPL_YES.indexOf(normalize(v).replace(/\s+/g, '')) >= 0;
+
+function parseTemplate(text) {
+  const blocks = [];
+  const errors = [];
+  const warnings = [];
+  let cur = null;
+
+  const startQuestion = (question, type) => {
+    cur = { type: type || null, question: question, options: [], correct: null,
+            maxWords: null, filter: null, multi: false, hideResults: null, secs: null };
+    blocks.push(cur);
+  };
+
+  String(text || '').replace(/\r\n?/g, '\n').split('\n').forEach((raw, i) => {
+    const n = i + 1;
+    const line = raw.trim();
+    if (!line) return;                        // una línea en blanco no corta nada
+    if (line.charAt(0) === '#' || line.slice(0, 2) === '//') return;
+
+    // ---- opción ----
+    const opt = line.match(/^([-–—*•·+])\s*(.+)$/);
+    if (opt) {
+      if (!cur) { errors.push('Línea ' + n + ': hay una opción antes de la primera pregunta.'); return; }
+      let txt = opt[2].trim();
+      let ok = opt[1] === '*';
+      const end = txt.match(/\s*(\*+|\(correcta\)|\(correcto\)|\[x\]|\(x\))$/i);
+      if (end) { ok = true; txt = txt.slice(0, end.index).trim(); }
+      if (!txt) { errors.push('Línea ' + n + ': la opción quedó vacía.'); return; }
+      cur.options.push(txt);
+      if (ok) {
+        if (cur.correct !== null) warnings.push('Línea ' + n + ': ya había una opción marcada como correcta; queda la última.');
+        cur.correct = cur.options.length - 1;
+      }
+      return;
+    }
+
+    // ---- ajuste de la pregunta abierta ----
+    const set = line.match(/^([A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]{1,24}?)\s*:\s*(.+)$/);
+    if (set && cur) {
+      const k = tplKey(set[1]);
+      const v = set[2].trim();
+      if (k === 'palabras' || k === 'palabrasporparticipante') {
+        const x = parseInt(v, 10);
+        if (!(x >= 1 && x <= 5)) errors.push('Línea ' + n + ': "palabras" va de 1 a 5.');
+        else cur.maxWords = x;
+        return;
+      }
+      if (k === 'filtro' || k === 'groserias') {
+        const f = TPL_FILTERS[tplKey(v)];
+        if (!f) errors.push('Línea ' + n + ': "filtro" acepta rechazar, censurar o libre.');
+        else cur.filter = f;
+        return;
+      }
+      if (k === 'multiple' || k === 'varias' || k === 'variasopciones') { cur.multi = tplYes(v); return; }
+      if (k === 'ocultar' || k === 'ocultarresultados') { cur.hideResults = tplYes(v); return; }
+      if (k === 'segundos' || k === 'tiempo') {
+        const x = parseInt(v, 10);
+        if (!(x >= 5 && x <= 120)) errors.push('Línea ' + n + ': "segundos" va de 5 a 120.');
+        else cur.secs = x;
+        return;
+      }
+      if (k === 'correcta' || k === 'correcto' || k === 'respuesta') {
+        const x = parseInt(v, 10);
+        if (x >= 1) cur.correctNum = x;                    // se resuelve al cerrar el bloque
+        else {
+          const j = cur.options.map(o => normalize(o)).indexOf(normalize(v));
+          if (j < 0) errors.push('Línea ' + n + ': "correcta" tiene que ser el número de la opción o su texto exacto.');
+          else cur.correct = j;
+        }
+        return;
+      }
+      // cualquier otra clave no es un ajuste: cae abajo y se toma como pregunta
+    }
+
+    // ---- pregunta nueva ----
+    let q = line.replace(/^\d+\s*[.)\-–]\s*/, '');          // "1. ", "2) ", "3 - "
+    let type = null;
+    const pre = q.match(/^([A-Za-zÁÉÍÓÚÜÑáéíóúüñ ]{3,20}?)\s*[:\-–]\s*(.+)$/);
+    if (pre && TPL_TYPES[tplKey(pre[1])]) { type = TPL_TYPES[tplKey(pre[1])]; q = pre[2].trim(); }
+    q = cleanQuestion(q);
+    if (!q) { errors.push('Línea ' + n + ': la pregunta quedó vacía.'); return; }
+    startQuestion(q, type);
+  });
+
+  blocks.forEach(b => {
+    if (b.correctNum) {
+      if (b.correctNum <= b.options.length) b.correct = b.correctNum - 1;
+      else errors.push('«' + b.question.slice(0, 40) + '»: "correcta: ' + b.correctNum + '" no existe, hay ' + b.options.length + ' opciones.');
+      delete b.correctNum;
+    }
+    if (!b.type) b.type = b.options.length ? 'poll' : 'cloud';
+  });
+
+  return { blocks, errors, warnings };
+}
+
+/* Revisa que lo cargado sirva para el modo en el que estamos. Devuelve la
+   lista de problemas: si está vacía, se puede importar. */
+function checkTemplate(blocks, mode) {
+  const bad = [];
+  const label = b => '«' + b.question.slice(0, 40) + (b.question.length > 40 ? '…' : '') + '»';
+  if (!blocks.length) bad.push('No encontramos ninguna pregunta en el texto.');
+  blocks.forEach(b => {
+    if (mode === 'comp') {
+      if (b.type === 'cloud' || !b.options.length) bad.push(label(b) + ': el modo competitivo necesita opciones; escribilas abajo con un guión.');
+      else if (b.options.length < 2) bad.push(label(b) + ': hacen falta al menos dos opciones.');
+      else if (b.options.length > 6) bad.push(label(b) + ': el modo competitivo admite hasta seis opciones.');
+      else if (b.correct === null) bad.push(label(b) + ': marcá la opción correcta con un asterisco.');
+    } else {
+      if (b.type === 'poll') {
+        if (b.options.length < 2) bad.push(label(b) + ': una encuesta necesita al menos dos opciones.');
+        else if (b.options.length > 10) bad.push(label(b) + ': una encuesta admite hasta diez opciones.');
+      }
+    }
+  });
+  return bad;
+}
+
+const TPL_EXAMPLE_SALA = `# Plantilla de ejemplo · nubes de palabras y encuestas
+# Las líneas que empiezan con # son comentarios y no se cargan.
+
+En una palabra, ¿cómo llegaste hoy?
+palabras: 2
+filtro: rechazar
+
+¿Cuál de estos temas querés que veamos primero?
+- Cómo se forma el precio
+- Quién controla el mercado
+- Qué pasa si quiebra un agente
+multiple: no
+
+NUBE: Terminá la frase: el mercado de capitales es…
+
+ENCUESTA: ¿Habías operado alguna vez?
+- Nunca
+- Alguna vez
+- Opero seguido
+ocultar: si
+`;
+
+const TPL_EXAMPLE_COMP = `# Plantilla de ejemplo · modo competitivo
+# El asterisco marca la opción correcta. Hasta seis opciones por pregunta.
+
+¿En qué año empezó a operar BYMA?
+- 1854
+* 2017
+- 1929
+- 2004
+segundos: 20
+
+¿Qué significa la sigla CNV?
+- Caja Nacional de Valores
+* Comisión Nacional de Valores
+- Cámara Nacional de Variaciones
+segundos: 25
+
+¿Cuál de estos NO es un instrumento de renta fija?
+- Bono del Tesoro
+- Obligación negociable
+* Acción ordinaria
+`;
+
+/* Cuadro para pegar la plantilla. Lo usan los dos paneles: el de encuestas
+   y el del modo competitivo. Quien llama decide qué hacer con lo cargado. */
+window.TPL = {
+  parse: parseTemplate,
+  open: function (opts) {
+    const mode = opts.mode === 'comp' ? 'comp' : 'sala';
+    const ejemplo = mode === 'comp' ? TPL_EXAMPLE_COMP : TPL_EXAMPLE_SALA;
+    const old = document.getElementById('tplSheet');
+    if (old) old.remove();
+
+    document.body.insertAdjacentHTML('beforeend', `
+    <div class="sheet" id="tplSheet" role="dialog" aria-modal="true" aria-label="Cargar una plantilla">
+      <div class="sheet-box">
+        <div class="sheet-head">
+          <h3>Cargar preguntas desde una plantilla</h3>
+          <button class="btn btn-sm" id="tplX" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="sheet-body">
+          <p class="muted" style="margin-top:0">Pegá acá el texto, o cargá un archivo <code>.txt</code>.
+            Las preguntas se agregan al final de las que ya tenés; no se borra nada.</p>
+          <div class="btn-row" style="margin-bottom:10px">
+            <button class="btn btn-sm" id="tplPick">Cargar un archivo .txt</button>
+            <button class="btn btn-sm" id="tplFill">Pegar el ejemplo</button>
+            <button class="btn btn-sm" id="tplDown">Descargar el ejemplo</button>
+            <input type="file" id="tplFile" accept=".txt,.md,text/plain" style="display:none">
+          </div>
+          <textarea class="input tpl-ta" id="tplTa" spellcheck="false"
+            placeholder="Escribí o pegá acá tus preguntas…"></textarea>
+          <div id="tplOut" class="tpl-out"></div>
+          <details class="tpl-help">
+            <summary>Cómo se escribe</summary>
+            <ul>
+              <li>Una línea suelta es una pregunta. Si abajo no tiene opciones, es una <b>nube de palabras</b>.</li>
+              <li>Las líneas que empiezan con <code>-</code> son las <b>opciones</b> de la pregunta de arriba: eso la convierte en encuesta.</li>
+              <li>Un <code>*</code> en lugar del guión marca la <b>opción correcta</b>. Hace falta en el modo competitivo; en las encuestas se ignora.</li>
+              <li>Podés forzar el tipo escribiendo <code>NUBE:</code> o <code>ENCUESTA:</code> delante de la pregunta.</li>
+              <li>Ajustes, cada uno en su línea, debajo de la pregunta: <code>palabras: 2</code>,
+                  <code>filtro: rechazar</code> (o <code>censurar</code>, <code>libre</code>),
+                  <code>multiple: si</code>, <code>ocultar: si</code>, <code>segundos: 25</code>.</li>
+              <li>Las líneas que empiezan con <code>#</code> son comentarios. Numerar las preguntas
+                  (<code>1.</code>, <code>2)</code>) no molesta: se saca solo.</li>
+            </ul>
+          </details>
+        </div>
+        <div class="sheet-foot">
+          <span class="muted" id="tplCount" style="font-size:13px"></span>
+          <span class="spacer"></span>
+          <button class="btn" id="tplCancel">Cancelar</button>
+          <button class="btn btn-primary" id="tplGo" disabled>Agregar al final</button>
+        </div>
+      </div>
+    </div>`);
+
+    const sheet = document.getElementById('tplSheet');
+    const ta = document.getElementById('tplTa');
+    const out = document.getElementById('tplOut');
+    const go = document.getElementById('tplGo');
+    const count = document.getElementById('tplCount');
+    let parsed = { blocks: [], errors: [], warnings: [] };
+
+    const close = () => { document.removeEventListener('keydown', onKey); sheet.remove(); };
+    const onKey = e => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    sheet.addEventListener('mousedown', e => { if (e.target === sheet) close(); });
+    document.getElementById('tplX').onclick = close;
+    document.getElementById('tplCancel').onclick = close;
+
+    function review() {
+      parsed = parseTemplate(ta.value);
+      const bad = parsed.errors.concat(checkTemplate(parsed.blocks, mode));
+      const nube = parsed.blocks.filter(b => b.type === 'cloud').length;
+      const enc = parsed.blocks.length - nube;
+      if (!ta.value.trim()) {
+        out.innerHTML = ''; count.textContent = ''; go.disabled = true; return;
+      }
+      if (bad.length) {
+        out.innerHTML = `<div class="notice bad"><b>Hay que corregir ${bad.length === 1 ? 'una cosa' : bad.length + ' cosas'}:</b>
+          <ul style="margin:8px 0 0;padding-left:18px">${bad.slice(0, 8).map(m => `<li>${esc(m)}</li>`).join('')}
+          ${bad.length > 8 ? `<li>…y ${bad.length - 8} más.</li>` : ''}</ul></div>`;
+        count.textContent = '';
+        go.disabled = true;
+        return;
+      }
+      const resumen = mode === 'comp'
+        ? parsed.blocks.length + (parsed.blocks.length === 1 ? ' pregunta' : ' preguntas')
+        : [nube ? nube + (nube === 1 ? ' nube' : ' nubes') : '', enc ? enc + (enc === 1 ? ' encuesta' : ' encuestas') : '']
+            .filter(Boolean).join(' y ');
+      const aviso = (mode === 'sala' && parsed.blocks.some(b => b.correct !== null))
+        ? '<p class="muted" style="margin:8px 0 0;font-size:12.5px">Las marcas de respuesta correcta se ignoran: en una encuesta no hay opción correcta.</p>' : '';
+      out.innerHTML = `<div class="notice good"><b>Listo para agregar: ${esc(resumen)}.</b>
+        <ol class="tpl-list">${parsed.blocks.map(b => `<li>
+          <span class="badge ${b.type}">${b.type === 'cloud' ? 'Nube' : (mode === 'comp' ? (b.secs || opts.defaultSecs || 20) + 's' : 'Encuesta')}</span>
+          ${esc(b.question.split('\n')[0].slice(0, 90))}
+          ${b.options.length ? `<small>${esc(b.options.map((o, i) => (i === b.correct && mode === 'comp' ? '✓ ' : '') + o).join(' · ').slice(0, 140))}</small>` : ''}
+        </li>`).join('')}</ol>${aviso}
+        ${parsed.warnings.length ? `<p class="muted" style="margin:8px 0 0;font-size:12.5px">${esc(parsed.warnings[0])}</p>` : ''}</div>`;
+      count.textContent = resumen;
+      go.disabled = false;
+    }
+
+    ta.addEventListener('input', review);
+    document.getElementById('tplFill').onclick = () => { ta.value = ejemplo; review(); ta.focus(); };
+    document.getElementById('tplDown').onclick = () =>
+      download('plantilla-' + (mode === 'comp' ? 'competencia' : 'encuestas') + '.txt', ejemplo, 'text/plain');
+    const file = document.getElementById('tplFile');
+    document.getElementById('tplPick').onclick = () => file.click();
+    file.onchange = () => {
+      const f = file.files && file.files[0];
+      if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => { ta.value = String(rd.result || ''); review(); };
+      rd.onerror = () => toast('No se pudo leer el archivo');
+      rd.readAsText(f, 'utf-8');
+    };
+
+    go.onclick = () => {
+      if (go.disabled) return;
+      go.disabled = true; go.textContent = 'Agregando…';
+      Promise.resolve(opts.onImport(parsed.blocks))
+        .then(() => { close(); toast(parsed.blocks.length + (parsed.blocks.length === 1 ? ' pregunta agregada' : ' preguntas agregadas')); })
+        .catch(e => { go.disabled = false; go.textContent = 'Agregar al final'; toast(dbMsg(e)); });
+    };
+
+    ta.focus();
+  }
+};
+
+/* ---------------------------------------------------------------
    5. Ruteo
    --------------------------------------------------------------- */
 function route() {
@@ -476,6 +863,26 @@ function route() {
   if (!parts.length) {
     APP().innerHTML = '<div class="setup"><p class="muted">Cargando…</p></div>';
     return withAuth(renderHome);
+  }
+  /* Modo competitivo: vive en el mismo sitio y en la misma dirección.
+     #/comp            portada del juego
+     #/comp/host/CODE  panel del anfitrión
+     #/comp/CODE       pantalla del jugador (el público igual entra por #/CODE) */
+  if (parts[0] === 'comp') {
+    if (!window.QUIZ) {
+      return renderFatal('Falta el módulo competitivo',
+        'No se cargó quiz.js. Copialo al lado de index.html y recargá la página.');
+    }
+    if (!parts[1]) {
+      APP().innerHTML = '<div class="setup"><p class="muted">Cargando…</p></div>';
+      return withAuth(() => window.QUIZ.home());
+    }
+    if (parts[1] === 'host' && parts[2]) {
+      const cq = parts[2].toUpperCase();
+      APP().innerHTML = '<div class="setup"><p class="muted">Abriendo el panel…</p></div>';
+      return withAuth(() => window.QUIZ.host(cq));
+    }
+    return window.QUIZ.play(parts[1].toUpperCase());
   }
   if (parts[0] === 'remoto' && parts[1]) {
     const c = parts[1].toUpperCase();
@@ -516,13 +923,13 @@ function renderSetup() {
   </div>`;
 }
 
-function renderFatal(title, msg) {
+function renderFatal(title, msg, extra) {
   APP().innerHTML = `
   <div class="setup">
     <p class="eyebrow">Error</p>
     <h1 style="font-family:var(--display);font-size:32px;letter-spacing:-.03em;margin:8px 0 14px">${esc(title)}</h1>
     <p class="muted">${esc(msg)}</p>
-    <p><a class="btn" href="#">Volver al inicio</a></p>
+    <div class="btn-row" style="margin-top:18px">${extra || ''}<a class="btn" href="#">Volver al inicio</a></div>
   </div>`;
 }
 
@@ -545,7 +952,7 @@ function fmtDate(ms) {
 }
 
 function renderHome() {
-  APP().innerHTML = topbar('', '<span id="acct"></span>') + `
+  APP().innerHTML = topbar('', '<a class="btn btn-sm" href="#/comp">Modo competitivo</a><span id="acct"></span>') + `
   <div class="home">
     <div class="home-hero">
       <p class="eyebrow">Nubes de palabras y encuestas en vivo</p>
@@ -575,6 +982,8 @@ function renderHome() {
                  style="font-family:var(--mono);text-transform:uppercase;letter-spacing:.12em">
           <button class="btn btn-primary" id="jb">Entrar</button>
         </div>
+        <p class="muted" style="margin-top:18px">¿Querés una competencia con puntaje y ranking?
+          <a href="#/comp">Abrí el modo competitivo</a>.</p>
       </div>
     </div>
     <section style="margin-top:38px">
@@ -822,6 +1231,7 @@ function renderHost(code) {
         <div class="btn-row">
           <button class="btn btn-sm" data-add="cloud">+ Nube</button>
           <button class="btn btn-sm" data-add="poll">+ Encuesta</button>
+          <button class="btn btn-sm" id="tplBtn">Cargar plantilla</button>
         </div>
         <p class="muted" style="font-size:12px;margin:9px 0 0">Arrastralas para cambiar el orden, o usá las flechas.</p>
       </section>
@@ -957,6 +1367,25 @@ function renderHost(code) {
       if (!confirm('Se elimina la sesión y todas sus respuestas. Esta acción no se puede deshacer.')) return;
       deleteSession(code).then(() => { location.hash = ''; });
     };
+
+    /* Cargar una batería de preguntas escrita afuera. Se agregan al final,
+       en una sola escritura, y la primera queda activa. */
+    document.getElementById('tplBtn').onclick = () => window.TPL.open({
+      mode: 'sala',
+      onImport: blocks => {
+        const prev = itemsSorted(state.session);
+        let order = prev.length ? (prev[prev.length - 1][1].order || prev.length) : 0;
+        const up = {};
+        let firstId = null;
+        blocks.forEach((b, i) => {
+          const id = 'q' + (Date.now() + i).toString(36);
+          if (!firstId) firstId = id;
+          up['items/' + id] = itemFromBlock(b, ++order);
+        });
+        if (firstId) up['activeItem'] = firstId;
+        return sref.update(up);
+      }
+    });
   }
 
   /* ---- escenario ---- */
@@ -1376,7 +1805,14 @@ function renderJoin(code) {
     let s;
     try { s = await restGet('sessions/' + code); }
     catch (e) { return fail('No pudimos conectarnos. Revisá tu conexión y volvé a intentar.'); }
-    if (!s) return fail('No encontramos ninguna sesión con el código ' + code + '. Revisalo con quien está presentando.');
+    if (!s) {
+      /* Puede ser el código de una competencia: el público entra a las dos
+         por la misma dirección, así que probamos ahí antes de dar error. */
+      let q = null;
+      try { q = await restGet('quizzes/' + code); } catch (e) { q = null; }
+      if (q && window.QUIZ) return window.QUIZ.play(code);
+      return fail('No encontramos nada con el código ' + code + '. Revisalo con quien está presentando.');
+    }
     st.s = s;
     st.shown = ((s.items || {})[s.activeItem] || {}).shown === true;
     setItem(s.activeItem, (s.items || {})[s.activeItem]);

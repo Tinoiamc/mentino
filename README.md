@@ -1,9 +1,10 @@
 # Sala
 
-Nubes de palabras y encuestas en vivo para audiencias. Alternativa mínima a Mentimeter,
-con link y QR para que la gente entre, resultados en tiempo real en la pantalla del
-presentador, exportación a CSV/JSON, opción de ocultar los resultados hasta que la persona
-responda y control de groserías.
+Nubes de palabras, encuestas y competencias de preguntas en vivo para audiencias.
+Alternativa mínima a Mentimeter, con link y QR para que la gente entre, resultados en
+tiempo real en la pantalla del presentador, exportación a CSV/JSON, opción de ocultar los
+resultados hasta que la persona responda y control de groserías. Las preguntas se escriben
+una por una o se cargan de una plantilla de texto.
 
 Se hospeda gratis en **GitHub Pages** (la parte visible) más **Firebase Realtime Database**
 (donde se guardan las respuestas). Ninguna de las dos pide tarjeta de crédito. Preparado para
@@ -26,7 +27,7 @@ nube hace falta un lugar compartido donde escribir. Eso lo aporta Firebase.
 3. Ponele un nombre, por ejemplo `sala`. Marcá **Public**. Creá el repositorio.
 4. En la pantalla que aparece, hacé clic en **uploading an existing file**.
 5. Arrastrá los archivos de esta carpeta: `index.html`, `styles.css`, `app.js`, `config.js`,
-   `database.rules.json`, `README.md`. Abajo, **Commit changes**.
+   `quiz.js`, `quiz.css`, `database.rules.json`, `README.md`. Abajo, **Commit changes**.
 6. Andá a la pestaña **Settings** del repositorio → menú izquierdo **Pages**.
 7. En *Source* elegí **Deploy from a branch**; en *Branch* elegí `main` y la carpeta `/ (root)`.
    **Save**.
@@ -100,13 +101,17 @@ suelen seguir usando la copia guardada de `app.js`. Por eso los enlaces de `inde
 número de versión:
 
 ```html
-<link rel="stylesheet" href="styles.css?v=5">
-<script src="config.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<link rel="stylesheet" href="styles.css?v=9">
+<link rel="stylesheet" href="quiz.css?v=9">
+<script src="config.js?v=9"></script>
+<script src="quiz.js?v=9"></script>
+<script src="app.js?v=9"></script>
 ```
 
-**Cada vez que subas una versión nueva, cambiá ese número en los tres enlaces** (de `v=5` a `v=6`,
+**Cada vez que subas una versión nueva, cambiá ese número en los cinco enlaces** (de `v=9` a `v=10`,
 y así). Con eso, todos los dispositivos descargan la copia nueva la primera vez que entran.
+El número que muestra la pantalla de ingreso sale de la constante `BUILD`, arriba de `app.js`:
+conviene moverla junto con los enlaces.
 
 La pantalla de ingreso muestra abajo la versión que está corriendo. Si el teléfono y la
 computadora muestran números distintos, el teléfono quedó con la copia vieja: cerrá la pestaña y
@@ -194,7 +199,9 @@ alcanza.
 **Antes**
 
 1. Entrá a tu sitio y hacé clic en **Crear sesión**.
-2. Escribí la primera pregunta. Con **+ Nube** y **+ Encuesta** agregás las siguientes. Las
+2. Escribí la primera pregunta. Con **+ Nube** y **+ Encuesta** agregás las siguientes, y con
+   **Cargar plantilla** subís de una vez una tanda entera escrita en un archivo de texto
+   (más abajo, *Cargar las preguntas desde una plantilla*). Las
    preguntas se reordenan **arrastrándolas** en la lista, o con las flechas ↑ ↓ de cada una.
 
    El enunciado no tiene tope de caracteres: el campo crece mientras escribís y **Enter** hace un
@@ -252,6 +259,77 @@ Si además de esto tenés diapositivas de PowerPoint, lo más cómodo es:
 
 ---
 
+## Cargar las preguntas desde una plantilla
+
+El botón **Cargar plantilla**, en la barra lateral del panel, abre un cuadro donde pegás el
+texto de tus preguntas o cargás un archivo `.txt`. Las preguntas se **agregan al final** de
+las que ya tenés: no se pisa ni se borra nada. El mismo botón está en el panel de encuestas
+y en el del modo competitivo.
+
+Antes de agregar nada, el cuadro muestra la lista de lo que entendió. Si algo está mal
+escrito, lo dice y no deja continuar. **Pegar el ejemplo** llena el cuadro con una plantilla
+de muestra y **Descargar el ejemplo** la baja como archivo, para usarla de molde.
+
+### El formato
+
+Es un archivo de texto común, del Bloc de notas o de Word guardado como texto plano:
+
+```
+En una palabra, ¿cómo llegaste hoy?
+palabras: 2
+filtro: rechazar
+
+¿Cuál de estos temas querés que veamos primero?
+- Cómo se forma el precio
+- Quién controla el mercado
+- Qué pasa si quiebra un agente
+
+ENCUESTA: ¿Habías operado alguna vez?
+- Nunca
+- Alguna vez
+- Opero seguido
+ocultar: si
+```
+
+Las reglas son cuatro:
+
+- **Una línea suelta es una pregunta.** Si abajo no tiene opciones, queda como nube de palabras.
+- **Las líneas que empiezan con `-` son las opciones** de la pregunta de arriba, y eso la
+  convierte en encuesta. Un `*` en lugar del guión marca la **opción correcta**: hace falta en
+  el modo competitivo y se ignora en las encuestas, así que un mismo archivo sirve para los dos.
+- **`clave: valor`, cada uno en su línea, ajusta la pregunta de arriba.** Las claves son
+  `palabras` (1 a 5), `filtro` (`rechazar`, `censurar` o `libre`), `multiple` (`si`/`no`),
+  `ocultar` (`si`/`no`), `segundos` (5 a 120, modo competitivo) y `correcta` (el número de la
+  opción, si preferís no usar asteriscos).
+- **Las líneas que empiezan con `#` son comentarios** y no se cargan.
+
+Detalles que suelen aparecer: numerar las preguntas (`1.`, `2)`) no molesta, se saca sola;
+escribir `NUBE:` o `ENCUESTA:` delante de una pregunta fuerza el tipo; las líneas en blanco no
+hacen falta pero se aceptan; una pregunta con dos puntos en el medio (`Tema del día: ¿qué te
+llevás?`) sigue siendo una pregunta, porque solo las claves de la lista cuentan como ajuste.
+
+Los topes son los mismos que cargando a mano: hasta diez opciones por encuesta y hasta seis
+por pregunta del modo competitivo, que además exige una correcta marcada en cada una.
+
+---
+
+## Modo competitivo
+
+Además de las nubes y las encuestas, el mismo sitio tiene una competencia de preguntas contra
+reloj: el público entra con un nombre (sin cuenta ni correo), contesta, y gana quien acierta y
+es rápido. Se entra desde **Modo competitivo**, arriba a la derecha de la portada, o yendo
+directo a `TU-SITIO/#/comp`.
+
+- La respuesta correcta **no viaja al público**: vive en un nodo aparte que solo puede leer el
+  anfitrión. El puntaje lo calcula el panel y publica la tabla ya resuelta.
+- Acertar da los puntos de la pregunta; contestar sobre el final conserva la mitad; errar o no
+  llegar, cero. Los dos valores se cambian en la barra lateral del panel.
+- El público entra con el código de seis caracteres por la misma dirección que las encuestas:
+  la aplicación se da cuenta sola de si ese código es de una sesión o de una competencia.
+- Las preguntas se cargan de a una o con **Cargar plantilla**, marcando la correcta con `*`.
+
+---
+
 ## Opciones
 
 | Opción | Dónde | Qué hace |
@@ -303,7 +381,17 @@ insultos armados con ingenio; para eso están la lista propia y el botón de bor
 ```
 index.html            estructura de la página
 styles.css            estilos
-app.js                toda la lógica
+app.js                la lógica de las nubes, las encuestas y las plantillas
+quiz.js               la lógica del modo competitivo
+quiz.css              estilos propios del modo competitivo
 config.js             lo único que tenés que editar
 database.rules.json   reglas de seguridad para pegar en Firebase
 ```
+
+`quiz.js` no arranca por su cuenta: define `window.QUIZ` y espera a que `app.js` lo llame.
+La conexión con Firebase, el ingreso y el ruteo son únicos y viven en `app.js`, que se los
+presta por `window.ENC`. Por eso `quiz.js` va **antes** que `app.js` en `index.html`.
+
+> Si ya tenías publicada una versión anterior, volvé a pegar `database.rules.json` en la
+> consola de Firebase: ahora incluye los nodos del modo competitivo (`quizzes`, `qsec`,
+> `qplayers`, `qa`, `qrank`, `qmine`). Sin eso, la competencia no guarda nada.
