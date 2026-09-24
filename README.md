@@ -204,8 +204,12 @@ alcanza.
    (más abajo, *Cargar las preguntas desde una plantilla*). Las
    preguntas se reordenan **arrastrándolas** en la lista, o con las flechas ↑ ↓ de cada una.
 
+   El editor **se guarda solo**: no hay botón que apretar. Mientras escribís, debajo del editor
+   dice *Guardando…* y después *Guardado*; si a una encuesta todavía le faltan opciones con texto,
+   lo avisa ahí mismo. Podés cargar una pregunta atrás de otra sin frenarte en cada una.
+
    El enunciado no tiene tope de caracteres: el campo crece mientras escribís y **Enter** hace un
-   salto de línea (para guardar sin soltar el teclado, **Ctrl+Enter**). En la pantalla proyectada y
+   salto de línea. En la pantalla proyectada y
    en el celular del público la tipografía se achica sola hasta que la pregunta entra completa, así
    que una consigna larga se acomoda al espacio en lugar de recortarse. Lo mismo vale para las
    opciones de una encuesta y para el nombre de la sesión.
@@ -239,6 +243,9 @@ computadora en modo *Presentar*: el proyector obedece lo que tocás en el teléf
 
 Lo que hagas ahí se refleja en la pantalla proyectada al instante. Ese QR es solo para vos: quien
 lo escanee sin tu contraseña no entra. El del público sigue siendo el otro, el de arriba.
+
+El **modo competitivo tiene su propio control**, con el mismo QR en la barra lateral de su panel.
+Está más abajo, en *Modo competitivo*.
 
 Si además de esto tenés diapositivas de PowerPoint, lo más cómodo es:
 
@@ -327,6 +334,15 @@ directo a `TU-SITIO/#/comp`.
 - El público entra con el código de seis caracteres por la misma dirección que las encuestas:
   la aplicación se da cuenta sola de si ese código es de una sesión o de una competencia.
 - Las preguntas se cargan de a una o con **Cargar plantilla**, marcando la correcta con `*`.
+  El editor se guarda solo, igual que en las encuestas: escribís la pregunta, marcás la correcta
+  y pasás a la siguiente sin apretar nada.
+- **Control desde el celular**: en la barra lateral del panel, *Control desde el celular →
+  Mostrar el QR de control*. Escaneado con tu teléfono te abre una pantalla chica con el tiempo
+  que queda, cuántos contestaron, y los botones para empezar, cerrar la pregunta, pasar a la
+  siguiente, terminar y mostrar el ranking o volver a la sala de espera. Entre pregunta y
+  pregunta ves qué opción era la correcta, cómo se repartieron las respuestas y las posiciones.
+  La computadora sigue proyectando; el teléfono solo maneja. Con una pregunta abierta no deja
+  saltar a otra, para no moverle el piso a quien está contestando.
 
 ---
 

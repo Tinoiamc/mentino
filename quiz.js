@@ -366,12 +366,178 @@ function loadMine() {
 }
 
 /* ---------------------------------------------------------------
+   6 bis. Motor de la competencia
+   Pasar preguntas, cortar el tiempo, calcular los puntajes y publicar la
+   tabla. Lo usan las dos pantallas del anfitrion -el panel de la
+   computadora y el control del celular-, asi que las dos escriben
+   exactamente el mismo estado: da igual desde donde se maneje el juego.
+   --------------------------------------------------------------- */
+function quizEngine(code, S) {
+  const qref = db.ref('quizzes/' + code);
+  const E = { qref: qref, srvOff: 0, onTick: null };
+
+  E.remaining = function () {
+    if (!S.qLocalStart) return 0;
+    return Math.max(0, S.qSecs * 1000 - (Date.now() - S.qLocalStart));
+  };
+  E.startTicker = function () {
+    E.stopTicker();
+    S.ticker = setInterval(function () { if (E.onTick) E.onTick(); }, 200);
+    timers.push(S.ticker);
+  };
+  E.stopTicker = function () { if (S.ticker) { clearInterval(S.ticker); S.ticker = null; } };
+
+  /* Alineamos el reloj con el del servidor, que es el que usan los
+     celulares. Asi el conteo coincide y, si recargas la pantalla a mitad de
+     una pregunta, el tiempo sigue donde estaba en vez de arrancar de cero. */
+  E.adopt = function (q) {
+    if (q.state !== 'q' || !q.live || !q.live.at) return;
+    S.qSecs = q.live.secs || q.secs || DEF_SECS;
+    S.qLocalStart = q.live.at - E.srvOff;
+    const left = S.qSecs * 1000 - (Date.now() - S.qLocalStart);
+    clearTimeout(S.autoT);
+    S.autoT = setTimeout(function () { E.closeQuestion(); }, Math.max(300, left + 1200));
+    timeouts.push(S.autoT);
+    E.startTicker();
+  };
+
+  /* ---- maquina de estados ---- */
+  E.startQuestion = function (index) {
+    const list = itemsSorted(S.quiz);
+    if (!list.length) return toast('Carga al menos una pregunta');
+    const idx = Math.max(0, Math.min(index, list.length - 1));
+    const entry = list[idx];
+    const qid = entry[0], it = entry[1];
+    const secs = it.secs || S.quiz.secs || DEF_SECS;
+    S.qLocalStart = Date.now();
+    S.qSecs = secs;
+    clearTimeout(S.autoT);
+    S.autoT = setTimeout(function () { E.closeQuestion(); }, secs * 1000 + 1200);
+    timeouts.push(S.autoT);
+    E.startTicker();
+    qref.update({
+      state: 'q', i: idx,
+      live: { st: 'q', qid: qid, i: idx, at: firebase.database.ServerValue.TIMESTAMP, secs: secs, n: list.length }
+    }).catch(function (e) { toast(dbMsg(e)); });
+  };
+
+  E.closeQuestion = function () {
+    clearTimeout(S.autoT);
+    E.stopTicker();
+    if (!S.quiz || S.quiz.state !== 'q') return;
+    const list = itemsSorted(S.quiz);
+    const idx = S.quiz.i || 0;
+    const entry = list[idx];
+    qref.update({
+      state: 'rev',
+      live: { st: 'rev', qid: entry ? entry[0] : '', i: idx, at: firebase.database.ServerValue.TIMESTAMP,
+              secs: S.qSecs, n: list.length }
+    }).then(function () { return E.publishRank(false); }).catch(function (e) { toast(dbMsg(e)); });
+  };
+
+  E.advance = function () {
+    const st = S.quiz.state;
+    if (st === 'lobby') return E.startQuestion(S.quiz.i || 0);
+    if (st === 'q') return E.closeQuestion();
+    if (st === 'rev') {
+      const list = itemsSorted(S.quiz);
+      const next = (S.quiz.i || 0) + 1;
+      if (next < list.length) return E.startQuestion(next);
+      return E.endGame();
+    }
+  };
+
+  E.endGame = function () {
+    clearTimeout(S.autoT); E.stopTicker();
+    const list = itemsSorted(S.quiz);
+    qref.update({
+      state: 'end',
+      live: { st: 'end', qid: '', i: S.quiz.i || 0, at: firebase.database.ServerValue.TIMESTAMP,
+              secs: 0, n: list.length }
+    }).then(function () { return E.publishRank(true); }).catch(function (e) { toast(dbMsg(e)); });
+  };
+
+  E.backToLobby = function (wipe) {
+    clearTimeout(S.autoT); E.stopTicker();
+    const list = itemsSorted(S.quiz);
+    const go = function () {
+      return qref.update({
+        state: 'lobby', i: 0,
+        live: { st: 'lobby', qid: '', i: 0, at: 0, secs: S.quiz.secs || DEF_SECS, n: list.length }
+      });
+    };
+    if (!wipe) return go().catch(function (e) { toast(dbMsg(e)); });
+    Promise.all([
+      db.ref('qa/' + code).remove(),
+      db.ref('qplayers/' + code).remove(),
+      db.ref('qrank/' + code).remove()
+    ]).then(go).then(function () { toast('Todo en cero: podes jugar de nuevo con otro grupo'); })
+      .catch(function (e) { toast(dbMsg(e)); });
+  };
+
+  /* ---- tabla de posiciones ---- */
+  E.computeRank = function () {
+    const list = itemsSorted(S.quiz);
+    const base = S.quiz.base || DEF_BASE;
+    const acc = {};
+    Object.keys(S.players).forEach(function (p) { acc[p] = { n: S.players[p].n || 'Sin nombre', s: 0, ok: 0, ans: 0 }; });
+    list.forEach(function (pair) {
+      const qid = pair[0], it = pair[1];
+      const correct = S.sec[qid];
+      const rs = S.answers[qid] || {};
+      Object.keys(rs).forEach(function (p) {
+        if (!acc[p]) acc[p] = { n: 'Sin nombre', s: 0, ok: 0, ans: 0 };
+        const pts = scoreOf(rs[p], correct, it.secs || S.quiz.secs, base);
+        acc[p].s += pts; acc[p].ans++;
+        if (pts > 0) acc[p].ok++;
+      });
+    });
+    return Object.keys(acc)
+      .map(function (p) { return { p: p, n: acc[p].n, s: acc[p].s, ok: acc[p].ok }; })
+      .sort(function (a, b) { return b.s - a.s || String(a.n).localeCompare(String(b.n)); });
+  };
+
+  /* Publica la tabla ya resuelta y, si corresponde, el detalle de la ultima
+     pregunta (cual era la correcta y como se repartieron las respuestas).
+     El publico solo lee esto: nunca ve la respuesta correcta antes de tiempo. */
+  E.publishRank = function (done) {
+    const arr = E.computeRank();
+    const sc = {};
+    arr.slice(0, 400).forEach(function (r, i) { sc[r.p] = [i + 1, r.s]; });
+    const payload = {
+      at: firebase.database.ServerValue.TIMESTAMP,
+      n: arr.length,
+      done: !!done,
+      top: arr.slice(0, 50),
+      sc: sc
+    };
+    const list = itemsSorted(S.quiz);
+    const entry = list[S.quiz.i || 0];
+    if (entry) {
+      const qid = entry[0], it = entry[1];
+      const rs = S.answers[qid] || {};
+      const counts = (it.options || []).map(function () { return 0; });
+      Object.keys(rs).forEach(function (p) { const c = rs[p].c; if (counts[c] !== undefined) counts[c]++; });
+      payload.last = {
+        qid: qid, i: (S.quiz.i || 0) + 1, q: it.question || '',
+        opts: it.options || [], correct: typeof S.sec[qid] === 'number' ? S.sec[qid] : -1,
+        counts: counts, secs: it.secs || S.quiz.secs || DEF_SECS, base: S.quiz.base || DEF_BASE
+      };
+    }
+    return db.ref('qrank/' + code).set(payload).catch(function (e) { toast(dbMsg(e)); });
+  };
+
+  return E;
+}
+
+/* ---------------------------------------------------------------
    7. Panel del anfitrión (backoffice)
    --------------------------------------------------------------- */
 function renderHostQuiz(code) {
   const S = {
     code, quiz: null, sec: {}, players: {}, answers: {},
-    qLocalStart: 0, qSecs: DEF_SECS, autoT: null, ticker: null
+    qLocalStart: 0, qSecs: DEF_SECS, autoT: null, ticker: null,
+    edTouch: 0, edTimer: null
   };
 
   APP().innerHTML = topbar('', '') + `<div class="host"><div class="rail"></div>
@@ -379,8 +545,9 @@ function renderHostQuiz(code) {
     <button class="btn exit-present" id="exitPres">Salir de presentación</button>`;
   document.getElementById('exitPres').onclick = () => document.body.classList.remove('present');
 
-  const qref = db.ref('quizzes/' + code);
-  let srvOff = 0;   // diferencia entre el reloj de esta máquina y el del servidor
+  const E = quizEngine(code, S);
+  const qref = E.qref;
+  E.onTick = paintTimer;
 
   /* Atajos: flecha derecha avanza (empezar / siguiente), Escape sale de
      presentación, barra espaciadora cierra la pregunta abierta. */
@@ -388,8 +555,8 @@ function renderHostQuiz(code) {
     const t = e.target;
     if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
     if (!S.quiz) return;
-    if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); advance(); }
-    else if ((e.key === ' ' || e.key === 'Spacebar') && S.quiz.state === 'q') { e.preventDefault(); closeQuestion(); }
+    if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); E.advance(); }
+    else if ((e.key === ' ' || e.key === 'Spacebar') && S.quiz.state === 'q') { e.preventDefault(); E.closeQuestion(); }
     else if (e.key === 'Escape') document.body.classList.remove('present');
   });
 
@@ -403,170 +570,27 @@ function renderHostQuiz(code) {
         `<a class="btn btn-primary" href="#/${esc(code)}">Entrar a jugar</a>`);
     }
     S.quiz = q;
-    /* Alineamos el reloj con el del servidor, que es el que usan los
-       celulares. Así el conteo coincide y, si recargás el panel a mitad de
-       una pregunta, el tiempo sigue donde estaba en vez de arrancar de cero. */
-    if (q.state === 'q' && q.live && q.live.at) {
-      S.qSecs = q.live.secs || q.secs || DEF_SECS;
-      S.qLocalStart = q.live.at - srvOff;
-      const left = S.qSecs * 1000 - (Date.now() - S.qLocalStart);
-      clearTimeout(S.autoT);
-      S.autoT = setTimeout(() => closeQuestion(), Math.max(300, left + 1200));
-      timeouts.push(S.autoT);
-      startTicker();
-    }
+    E.adopt(q);
     paint();
   }, e => renderFatal('No se pudo leer la competencia', dbMsg(e)));
 
-  on(db.ref('.info/serverTimeOffset'), 'value', s => { srvOff = s.val() || 0; });
+  on(db.ref('.info/serverTimeOffset'), 'value', s => { E.srvOff = s.val() || 0; });
 
   on(db.ref('qsec/' + code), 'value', s => { S.sec = s.val() || {}; paint(); });
   on(db.ref('qplayers/' + code), 'value', s => { S.players = s.val() || {}; paint(); });
   on(db.ref('qa/' + code), 'value', s => { S.answers = s.val() || {}; paint(); });
 
-  /* ---- reloj propio del anfitrión ---- */
-  function startTicker() {
-    stopTicker();
-    S.ticker = setInterval(paintTimer, 200);
-    timers.push(S.ticker);
-  }
-  function stopTicker() { if (S.ticker) { clearInterval(S.ticker); S.ticker = null; } }
-  function remaining() {
-    if (!S.qLocalStart) return 0;
-    return Math.max(0, S.qSecs * 1000 - (Date.now() - S.qLocalStart));
-  }
+  /* ---- reloj en pantalla ---- */
   function paintTimer() {
     const num = document.getElementById('tnum'), fill = document.getElementById('tfill');
     if (!num || !fill) return;
-    const ms = remaining();
+    const ms = E.remaining();
     const s = Math.ceil(ms / 1000);
     num.textContent = s;
     const pct = Math.max(0, Math.min(100, ms / (S.qSecs * 1000) * 100));
     fill.style.width = pct + '%';
     num.classList.toggle('warn', s <= 5);
     fill.classList.toggle('warn', s <= 5);
-  }
-
-  /* ---- máquina de estados ---- */
-  function startQuestion(index) {
-    const list = itemsSorted(S.quiz);
-    if (!list.length) return toast('Cargá al menos una pregunta');
-    const idx = Math.max(0, Math.min(index, list.length - 1));
-    const [qid, it] = list[idx];
-    const secs = it.secs || S.quiz.secs || DEF_SECS;
-    S.qLocalStart = Date.now();
-    S.qSecs = secs;
-    clearTimeout(S.autoT);
-    S.autoT = setTimeout(() => closeQuestion(), secs * 1000 + 1200);
-    timeouts.push(S.autoT);
-    startTicker();
-    qref.update({
-      state: 'q', i: idx,
-      live: { st: 'q', qid: qid, i: idx, at: firebase.database.ServerValue.TIMESTAMP, secs: secs, n: list.length }
-    }).catch(e => toast(dbMsg(e)));
-  }
-
-  function closeQuestion() {
-    clearTimeout(S.autoT);
-    stopTicker();
-    if (!S.quiz || S.quiz.state !== 'q') return;
-    const list = itemsSorted(S.quiz);
-    const idx = S.quiz.i || 0;
-    const entry = list[idx];
-    qref.update({
-      state: 'rev',
-      live: { st: 'rev', qid: entry ? entry[0] : '', i: idx, at: firebase.database.ServerValue.TIMESTAMP,
-              secs: S.qSecs, n: list.length }
-    }).then(() => publishRank(false)).catch(e => toast(dbMsg(e)));
-  }
-
-  function advance() {
-    const st = S.quiz.state;
-    if (st === 'lobby') return startQuestion(0);
-    if (st === 'q') return closeQuestion();
-    if (st === 'rev') {
-      const list = itemsSorted(S.quiz);
-      const next = (S.quiz.i || 0) + 1;
-      if (next < list.length) return startQuestion(next);
-      return endGame();
-    }
-  }
-
-  function endGame() {
-    clearTimeout(S.autoT); stopTicker();
-    const list = itemsSorted(S.quiz);
-    qref.update({
-      state: 'end',
-      live: { st: 'end', qid: '', i: S.quiz.i || 0, at: firebase.database.ServerValue.TIMESTAMP,
-              secs: 0, n: list.length }
-    }).then(() => publishRank(true)).catch(e => toast(dbMsg(e)));
-  }
-
-  function backToLobby(wipe) {
-    clearTimeout(S.autoT); stopTicker();
-    const list = itemsSorted(S.quiz);
-    const go = () => qref.update({
-      state: 'lobby', i: 0,
-      live: { st: 'lobby', qid: '', i: 0, at: 0, secs: S.quiz.secs || DEF_SECS, n: list.length }
-    });
-    if (!wipe) return go().catch(e => toast(dbMsg(e)));
-    Promise.all([
-      db.ref('qa/' + code).remove(),
-      db.ref('qplayers/' + code).remove(),
-      db.ref('qrank/' + code).remove()
-    ]).then(go).then(() => toast('Todo en cero: podés jugar de nuevo con otro grupo'))
-      .catch(e => toast(dbMsg(e)));
-  }
-
-  /* ---- tabla de posiciones ---- */
-  function computeRank() {
-    const list = itemsSorted(S.quiz);
-    const base = S.quiz.base || DEF_BASE;
-    const acc = {};
-    Object.keys(S.players).forEach(p => { acc[p] = { n: S.players[p].n || 'Sin nombre', s: 0, ok: 0, ans: 0 }; });
-    list.forEach(([qid, it]) => {
-      const correct = S.sec[qid];
-      const rs = S.answers[qid] || {};
-      Object.keys(rs).forEach(p => {
-        if (!acc[p]) acc[p] = { n: 'Sin nombre', s: 0, ok: 0, ans: 0 };
-        const pts = scoreOf(rs[p], correct, it.secs || S.quiz.secs, base);
-        acc[p].s += pts; acc[p].ans++;
-        if (pts > 0) acc[p].ok++;
-      });
-    });
-    return Object.keys(acc)
-      .map(p => ({ p: p, n: acc[p].n, s: acc[p].s, ok: acc[p].ok }))
-      .sort((a, b) => b.s - a.s || String(a.n).localeCompare(String(b.n)));
-  }
-
-  /* Publica la tabla ya resuelta y, si corresponde, el detalle de la última
-     pregunta (cuál era la correcta y cómo se repartieron las respuestas).
-     El público solo lee esto: nunca ve la respuesta correcta antes de tiempo. */
-  function publishRank(done) {
-    const arr = computeRank();
-    const sc = {};
-    arr.slice(0, 400).forEach((r, i) => { sc[r.p] = [i + 1, r.s]; });
-    const payload = {
-      at: firebase.database.ServerValue.TIMESTAMP,
-      n: arr.length,
-      done: !!done,
-      top: arr.slice(0, 50),
-      sc: sc
-    };
-    const list = itemsSorted(S.quiz);
-    const entry = list[S.quiz.i || 0];
-    if (entry) {
-      const [qid, it] = entry;
-      const rs = S.answers[qid] || {};
-      const counts = (it.options || []).map(() => 0);
-      Object.keys(rs).forEach(p => { const c = rs[p].c; if (counts[c] !== undefined) counts[c]++; });
-      payload.last = {
-        qid: qid, i: (S.quiz.i || 0) + 1, q: it.question || '',
-        opts: it.options || [], correct: typeof S.sec[qid] === 'number' ? S.sec[qid] : -1,
-        counts: counts, secs: it.secs || S.quiz.secs || DEF_SECS, base: S.quiz.base || DEF_BASE
-      };
-    }
-    return db.ref('qrank/' + code).set(payload).catch(e => toast(dbMsg(e)));
   }
 
   /* ---- pintar ---- */
@@ -604,17 +628,32 @@ function renderHostQuiz(code) {
   function paintRail(list) {
     const rail = document.querySelector('.rail');
     const url = baseUrl() + '#/' + code;
+    const remoteUrl = baseUrl() + '#/comp/remoto/' + code;
     const nP = Object.keys(S.players).length;
     const q = S.quiz;
 
-    const sig = q.state + '|' + (q.i || 0) + '|' + list.map(([id, it]) =>
-      id + (it.question || '') + (it.options || []).join('~') + (it.secs || '') + '|' + S.sec[id]).join('#');
-    if (rail.dataset.sig === sig) {
+    /* Lo único que obliga a rehacer la barra es la estructura: qué preguntas
+       hay, cuál está activa y cuáles ya tienen marcada la correcta. El texto
+       y los segundos se actualizan en el lugar, porque ahora el editor guarda
+       mientras escribís y rehacer la barra en cada tecla redibujaría el QR. */
+    const struct = q.state + '|' + (q.i || 0) + '|' +
+      list.map(([id]) => id + (typeof S.sec[id] === 'number' ? '!' : '?')).join('#');
+    if (rail.dataset.struct === struct) {
       const c = document.getElementById('cnt');
       if (c) c.innerHTML = `<b>${nP}</b><span>${nP === 1 ? 'persona conectada' : 'personas conectadas'}</span>`;
+      list.forEach(([id, it]) => {
+        const b = rail.querySelector('[data-go="' + id + '"]');
+        if (!b) return;
+        const t = b.querySelector('.slide-q');
+        const txt = it.question || 'Sin pregunta';
+        if (t && t.textContent !== txt) t.textContent = txt;
+        const sec = b.querySelector('.badge.poll');
+        const secTxt = (it.secs || q.secs || DEF_SECS) + 's';
+        if (sec && sec.textContent !== secTxt) sec.textContent = secTxt;
+      });
       return;
     }
-    rail.dataset.sig = sig;
+    rail.dataset.struct = struct;
 
     rail.innerHTML = `
       <section>
@@ -647,6 +686,16 @@ function renderHostQuiz(code) {
         <div class="btn-row">
           <button class="btn btn-sm" id="add">+ Pregunta</button>
           <button class="btn btn-sm" id="tplBtn">Cargar plantilla</button>
+        </div>
+      </section>
+      <section>
+        <h3>Control desde el celular</h3>
+        <p class="muted" style="font-size:12.5px;margin:-4px 0 9px">Escaneá esto con tu teléfono para pasar las preguntas sin volver a la computadora.</p>
+        <button class="btn btn-sm" id="remoteBtn">Mostrar el QR de control</button>
+        <div id="remoteBox" style="display:none;margin-top:10px;text-align:center">
+          <div class="qr-frame" style="border-color:var(--accent)"><div id="qr2"></div></div>
+          <p class="muted" style="font-family:var(--mono);font-size:11px;word-break:break-all;margin:8px 0 6px">${esc(remoteUrl)}</p>
+          <button class="btn btn-sm" id="cpy2">Copiar link de control</button>
         </div>
       </section>
       <section>
@@ -685,6 +734,23 @@ function renderHostQuiz(code) {
       const a = document.createElement('a');
       a.href = cv.toDataURL('image/png'); a.download = 'qr-' + code + '.png'; a.click();
     };
+    // QR del control remoto, a pedido
+    const rb = document.getElementById('remoteBtn');
+    rb.onclick = () => {
+      const box = document.getElementById('remoteBox');
+      const open = box.style.display !== 'none';
+      box.style.display = open ? 'none' : 'block';
+      rb.textContent = open ? 'Mostrar el QR de control' : 'Ocultar el QR de control';
+      if (!open && !box.dataset.done) {
+        box.dataset.done = '1';
+        try {
+          new QRCode(document.getElementById('qr2'), { text: remoteUrl, width: 148, height: 148,
+            colorDark: '#0B1A2A', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+        } catch (e) {}
+        document.getElementById('cpy2').onclick = () => copy(remoteUrl);
+      }
+    };
+
     rail.querySelectorAll('[data-go]').forEach(b => {
       b.onclick = () => {
         if (S.quiz.state === 'q') return toast('Cerrá la pregunta abierta antes de moverte');
@@ -734,7 +800,7 @@ function renderHostQuiz(code) {
     gb.onchange = () => qref.child('base').set(Math.max(100, Math.min(5000, parseInt(gb.value, 10) || DEF_BASE)));
     document.getElementById('rst').onclick = () => {
       if (!confirm('Se borran los jugadores y todos los puntajes. Las preguntas quedan como están.')) return;
-      backToLobby(true);
+      E.backToLobby(true);
     };
     document.getElementById('del').onclick = () => {
       if (!confirm('Se elimina la competencia completa. Esta acción no se puede deshacer.')) return;
@@ -769,7 +835,7 @@ function renderHostQuiz(code) {
             <button class="btn btn-lg btn-primary" id="bStart">Empezar la competencia</button>
           </div>
         </div>`;
-      document.getElementById('bStart').onclick = () => startQuestion(0);
+      document.getElementById('bStart').onclick = () => E.startQuestion(0);
       return;
     }
 
@@ -821,8 +887,8 @@ function renderHostQuiz(code) {
           <button class="btn" id="bEnd">Terminar y mostrar el ranking</button>
         </div>`;
       paintTimer();
-      document.getElementById('bClose').onclick = closeQuestion;
-      document.getElementById('bEnd').onclick = () => { if (confirm('¿Terminar la competencia y mostrar el ranking?')) endGame(); };
+      document.getElementById('bClose').onclick = E.closeQuestion;
+      document.getElementById('bEnd').onclick = () => { if (confirm('¿Terminar la competencia y mostrar el ranking?')) E.endGame(); };
       return;
     }
 
@@ -830,7 +896,7 @@ function renderHostQuiz(code) {
       stage.dataset.sig = 'rev|' + qid;
       const counts = (it.options || []).map(() => 0);
       Object.keys(rs).forEach(p => { const c = rs[p].c; if (counts[c] !== undefined) counts[c]++; });
-      const rank = computeRank();
+      const rank = E.computeRank();
       const last = idx + 1 >= list.length;
       stage.innerHTML = `
         <div class="stage-head">
@@ -852,15 +918,15 @@ function renderHostQuiz(code) {
           <button class="btn btn-primary" id="bNext">${last ? 'Mostrar el ranking final' : 'Siguiente pregunta'}</button>
           ${last ? '' : '<button class="btn" id="bEnd">Terminar acá</button>'}
         </div>`;
-      document.getElementById('bNext').onclick = () => last ? endGame() : startQuestion(idx + 1);
+      document.getElementById('bNext').onclick = () => last ? E.endGame() : E.startQuestion(idx + 1);
       const be = document.getElementById('bEnd');
-      if (be) be.onclick = () => { if (confirm('¿Terminar la competencia y mostrar el ranking?')) endGame(); };
+      if (be) be.onclick = () => { if (confirm('¿Terminar la competencia y mostrar el ranking?')) E.endGame(); };
       return;
     }
 
     // final
     stage.dataset.sig = 'end';
-    const rank = computeRank();
+    const rank = E.computeRank();
     stage.innerHTML = `
       <div class="stage-head"><h2 class="stage-q">Ranking final</h2>
         <div class="stage-meta">${esc(q.title)}<br>${rank.length} ${rank.length === 1 ? 'jugador' : 'jugadores'}</div></div>
@@ -872,14 +938,23 @@ function renderHostQuiz(code) {
         <button class="btn" id="bAgain">Volver a la sala de espera</button>
         <button class="btn" id="bWipe">Borrar puntajes y empezar de cero</button>
       </div>`;
-    document.getElementById('bAgain').onclick = () => backToLobby(false);
+    document.getElementById('bAgain').onclick = () => E.backToLobby(false);
     document.getElementById('bWipe').onclick = () => {
       if (!confirm('Se borran los jugadores y todos los puntajes.')) return;
-      backToLobby(true);
+      E.backToLobby(true);
     };
   }
 
   /* ---- editor de la pregunta seleccionada ---- */
+  /* Se guarda solo. Mientras escribís, lo que vuelve de la base es casi
+     siempre lo que vos mismo acabás de guardar: rehacer el editor con eso
+     te movería el cursor a la mitad de una palabra. Por eso, mientras hay
+     alguien escribiendo, el editor no se toca. */
+  function editing() {
+    const ed = document.querySelector('.editor');
+    return !!(ed && (ed.contains(document.activeElement) || Date.now() - (S.edTouch || 0) < 2500));
+  }
+
   function paintEditor(list) {
     const wrap = document.querySelector('.stage-wrap');
     let ed = wrap.querySelector('.editor');
@@ -889,12 +964,15 @@ function renderHostQuiz(code) {
     if (!ed) { wrap.insertAdjacentHTML('beforeend', '<div class="editor"></div>'); ed = wrap.querySelector('.editor'); }
 
     const entry = list[q.i || 0];
-    if (!entry) { ed.innerHTML = ''; ed.dataset.sig = ''; return; }
+    if (!entry) { ed.innerHTML = ''; ed.dataset.sig = ''; ed.dataset.qid = ''; return; }
     const [qid, it] = entry;
 
     const sig = qid + '|' + JSON.stringify(it) + '|' + S.sec[qid];
     if (ed.dataset.sig === sig) return;
+    if (ed.dataset.qid === qid && editing()) { ed.dataset.sig = sig; return; }
+    clearTimeout(S.edTimer);
     ed.dataset.sig = sig;
+    ed.dataset.qid = qid;
 
     ed.innerHTML = `
       <div class="editor-head">
@@ -917,23 +995,25 @@ function renderHostQuiz(code) {
           <input class="input" id="eSecs" type="number" min="5" max="120" value="${it.secs || q.secs || DEF_SECS}">
         </div>
       </div>
-      <div class="btn-row" style="margin-top:8px">
-        <button class="btn btn-primary" id="eSave">Guardar cambios</button>
-      </div>`;
+      <p class="muted" id="eState" style="font-size:12.5px;margin:10px 0 0">Se guarda solo mientras escribís.</p>`;
 
     const box = document.getElementById('eOpts');
+    const say = txt => { const el = document.getElementById('eState'); if (el) el.textContent = txt; };
+
     const wire = () => {
       box.querySelectorAll('[data-rm]').forEach(b => {
         b.onclick = () => {
           if (box.children.length <= 2) return toast('Tiene que haber al menos dos opciones');
           b.parentElement.remove();
           renumber();
+          save(true);
         };
       });
       box.querySelectorAll('.pick').forEach(b => {
         b.onclick = () => {
           box.querySelectorAll('.pick').forEach(x => { x.classList.remove('on'); x.textContent = 'Marcar'; });
           b.classList.add('on'); b.textContent = 'Correcta';
+          save(true);
         };
       });
     };
@@ -948,27 +1028,63 @@ function renderHostQuiz(code) {
       if (box.children.length >= 6) return toast('Máximo seis opciones');
       box.insertAdjacentHTML('beforeend', optRow('', box.children.length, false));
       wire();
+      S.edTouch = Date.now();
+      box.lastElementChild.querySelector('.input').focus();
     };
-    document.getElementById('eSave').onclick = () => {
+
+    /* Las opciones vacías no se guardan, pero tampoco se borran de la
+       pantalla mientras las estás escribiendo: el índice de la correcta se
+       corre para seguir apuntando a la misma opción. */
+    function collect() {
       const rows = Array.from(box.children);
-      const opts = rows.map(r => r.querySelector('.input').value.trim());
-      if (opts.filter(Boolean).length < 2) return toast('Tiene que haber al menos dos opciones con texto');
-      let correct = rows.findIndex(r => r.querySelector('.pick').classList.contains('on'));
-      if (correct < 0 || !opts[correct]) return toast('Marcá cuál es la opción correcta');
+      const raw = rows.map(r => r.querySelector('.input').value.trim());
+      const marked = rows.findIndex(r => r.querySelector('.pick').classList.contains('on'));
       const clean = [];
-      let shift = correct;
-      opts.forEach((o, i) => { if (o) clean.push(o); else if (i < correct) shift--; });
-      const secs = Math.max(5, Math.min(120, parseInt(document.getElementById('eSecs').value, 10) || DEF_SECS));
-      qref.child('items/' + qid).update({
+      let shift = marked;
+      raw.forEach((o, i) => { if (o) clean.push(o); else if (i < marked) shift--; });
+      return { options: clean, correct: shift, hasCorrect: marked >= 0 && !!raw[marked] };
+    }
+
+    function run() {
+      if (!ed.isConnected || ed.dataset.qid !== qid) return;   // cambiaste de pregunta
+      const c = collect();
+      const up = {
         question: (document.getElementById('eQ').value || '').trim() || 'Sin pregunta',
-        options: clean, secs: secs
-      }).then(() => db.ref('qsec/' + code + '/' + qid).set(shift))
-        .then(() => toast('Cambios guardados'))
-        .catch(e => toast(dbMsg(e)));
+        secs: Math.max(5, Math.min(120, parseInt(document.getElementById('eSecs').value, 10) || DEF_SECS))
+      };
+      if (c.options.length >= 2) up.options = c.options;
+      qref.child('items/' + qid).update(up)
+        .then(() => (c.hasCorrect ? db.ref('qsec/' + code + '/' + qid).set(c.correct) : null))
+        .then(() => {
+          if (c.options.length < 2) return say('Guardado · faltan opciones con texto');
+          if (!c.hasCorrect) return say('Guardado · falta marcar la opción correcta');
+          say('Guardado');
+        })
+        .catch(e => say(dbMsg(e)));
+    }
+
+    function save(now) {
+      S.edTouch = Date.now();
+      clearTimeout(S.edTimer);
+      say('Guardando…');
+      if (now) return run();
+      S.edTimer = setTimeout(run, 600);
+      timeouts.push(S.edTimer);
+    }
+
+    /* Propiedad y no addEventListener: el editor se repinta muchas veces y
+       así nunca quedan dos escuchas encima del mismo campo. */
+    ed.oninput = () => save(false);
+    ed.onchange = () => save(true);
+    document.getElementById('eQ').onkeydown = e => {
+      if (e.key === 'Enter') { e.preventDefault(); save(true); }
     };
+
     document.getElementById('eDel').onclick = () => {
       if (list.length < 2) return toast('La competencia necesita al menos una pregunta');
       if (!confirm('Se elimina la pregunta y sus respuestas.')) return;
+      clearTimeout(S.edTimer);
+      S.edTouch = 0;
       const up = {};
       up['items/' + qid] = null;
       up['i'] = 0;
@@ -983,7 +1099,7 @@ function renderHostQuiz(code) {
   /* ---- exportar ---- */
   function exportCsv() {
     const list = itemsSorted(S.quiz);
-    const rank = computeRank();
+    const rank = E.computeRank();
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
     const slug = (S.quiz.title || 'competencia').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase().slice(0, 40) || 'competencia';
@@ -1044,6 +1160,210 @@ function podium(rank) {
     ? `<div class="pod ${cls[i]}"><div class="medal">${med[i]}</div>
          <div class="nm">${esc(r.n)}</div><div class="pts">${r.s} pts</div></div>`
     : '<div></div>').join('')}</div>`;
+}
+
+/* ---------------------------------------------------------------
+   7 bis. Control desde el celular
+   La misma idea que el control de las encuestas: una pantalla chica para
+   el teléfono del anfitrión, con botones grandes y sin editor. La
+   computadora sigue proyectando; desde acá solo se maneja el juego, así no
+   hay que darse vuelta ni volver al escritorio entre pregunta y pregunta.
+   --------------------------------------------------------------- */
+function renderRemoteQuiz(code) {
+  const S = {
+    code: code, quiz: null, sec: {}, players: {}, answers: {},
+    qLocalStart: 0, qSecs: DEF_SECS, autoT: null, ticker: null
+  };
+
+  APP().innerHTML = topbar('', '') + '<div class="join" id="rq"><p class="muted">Cargando…</p></div>';
+
+  const E = quizEngine(code, S);
+  const qref = E.qref;
+  E.onTick = paintClock;
+
+  on(qref, 'value', snap => {
+    if (!snap.exists()) {
+      window.ENC.stop();
+      return renderFatal('Esa competencia no existe',
+        'El código ' + code + ' no corresponde a ninguna competencia.');
+    }
+    const q = snap.val();
+    if (q.owner !== uid) {
+      window.ENC.stop();
+      return renderFatal('Este control es del anfitrión',
+        'El control remoto lo abre únicamente quien creó la competencia. Si te compartieron el código, entrá a jugar.',
+        '<a class="btn btn-primary" href="#/' + esc(code) + '">Entrar a jugar</a>');
+    }
+    S.quiz = q;
+    E.adopt(q);
+    paint();
+  }, e => renderFatal('No se pudo leer la competencia', dbMsg(e)));
+
+  on(db.ref('.info/serverTimeOffset'), 'value', s => { E.srvOff = s.val() || 0; });
+  on(db.ref('qsec/' + code), 'value', s => { S.sec = s.val() || {}; paint(); });
+  on(db.ref('qplayers/' + code), 'value', s => { S.players = s.val() || {}; paint(); });
+  on(db.ref('qa/' + code), 'value', s => { S.answers = s.val() || {}; paint(); });
+
+  function paintClock() {
+    const num = document.getElementById('rtnum'), fill = document.getElementById('rtfill');
+    if (!num || !fill) return;
+    const ms = E.remaining();
+    const left = Math.ceil(ms / 1000);
+    num.textContent = left;
+    fill.style.width = Math.max(0, Math.min(100, ms / (S.qSecs * 1000) * 100)) + '%';
+    num.classList.toggle('warn', left <= 5);
+    fill.classList.toggle('warn', left <= 5);
+  }
+
+  function codeLine() {
+    return '<p class="muted" style="font-size:12.5px;margin-top:18px">Código de la competencia: ' +
+      '<b style="font-family:var(--mono)">' + esc(code) + '</b></p>';
+  }
+
+  /* Saltar de pregunta sirve antes de empezar y entre pregunta y pregunta;
+     con una pregunta abierta no, porque movería el piso a quien está
+     contestando en ese momento. */
+  function jumpList(list, q, idx) {
+    if (q.state === 'end') return codeLine();
+    return `<h3 style="font-family:var(--display);font-size:14px;margin:22px 0 10px">Ir a una pregunta</h3>
+      <div class="slides">
+        ${list.map(([id, it], i) => `
+          <button class="slide ${i === idx ? 'on' : ''}" data-jump="${i}">
+            <div class="slide-top">
+              <span class="slide-n">${i + 1}</span>
+              <span class="badge poll">${it.secs || q.secs || DEF_SECS}s</span>
+              ${typeof S.sec[id] === 'number' ? '' : '<span class="badge warn">sin correcta</span>'}
+            </div>
+            <div class="slide-q">${esc(it.question || 'Sin pregunta')}</div>
+          </button>`).join('')}
+      </div>` + codeLine();
+  }
+
+  /* Refresco liviano: los números que cambian solos, sin rehacer los
+     botones justo cuando el anfitrión los va a apretar. */
+  function live() {
+    const q = S.quiz;
+    if (!q) return;
+    const list = itemsSorted(q);
+    const idx = Math.max(0, Math.min(q.i || 0, list.length - 1));
+    const qid = (list[idx] || [])[0] || '';
+    const nP = Object.keys(S.players).length;
+    const nA = Object.keys(S.answers[qid] || {}).length;
+    const a = document.getElementById('rnA');
+    if (a) a.innerHTML = nA + '<small style="font-size:14px;color:var(--muted-dark)"> de ' + nP + '</small>';
+    const f = document.getElementById('rpfill');
+    if (f) f.style.width = (nP ? Math.round(nA / nP * 100) : 0) + '%';
+    const p = document.getElementById('rnP');
+    if (p) p.innerHTML = nP + '<small>' + (nP === 1 ? 'persona lista' : 'personas listas') + '</small>';
+  }
+
+  function paint() {
+    const q = S.quiz;
+    if (!q) return;
+    const w = document.getElementById('rq');
+    if (!w) return;
+
+    const list = itemsSorted(q);
+    const idx = Math.max(0, Math.min(q.i || 0, Math.max(0, list.length - 1)));
+    const entry = list[idx] || null;
+    const qid = entry ? entry[0] : '';
+    const it = entry ? entry[1] : null;
+    const nP = Object.keys(S.players).length;
+    const nA = Object.keys(S.answers[qid] || {}).length;
+    const last = idx + 1 >= list.length;
+
+    const sig = [q.state, qid, idx, list.length, q.state === 'q' ? '' : nA + '/' + nP,
+                 it ? (it.question || '') + (it.options || []).join('~') : '',
+                 S.sec[qid]].join('|');
+    if (w.dataset.sig === sig) return live();
+    w.dataset.sig = sig;
+
+    if (q.state === 'lobby') {
+      w.innerHTML = `
+        <p class="eyebrow">${esc(q.title || '')} · sala de espera</p>
+        <h1 class="join-q sm" style="margin-bottom:14px">${esc(it ? (it.question || 'Sin pregunta') : 'Todavía no hay preguntas')}</h1>
+        <div class="stage" style="padding:20px 16px;text-align:center">
+          <div class="bignum" id="rnP">${nP}<small>${nP === 1 ? 'persona lista' : 'personas listas'}</small></div>
+        </div>
+        <button class="btn btn-primary btn-lg" id="bGo" style="width:100%;margin-top:12px">
+          ${idx === 0 ? 'Empezar la competencia' : 'Empezar en la pregunta ' + (idx + 1)}</button>
+        ${jumpList(list, q, idx)}`;
+      document.getElementById('bGo').onclick = () => E.startQuestion(idx);
+
+    } else if (q.state === 'q') {
+      const pct = nP ? Math.round(nA / nP * 100) : 0;
+      w.innerHTML = `
+        <p class="eyebrow">Pregunta ${idx + 1} de ${list.length}</p>
+        <h1 class="join-q sm" style="margin-bottom:14px">${esc(it ? it.question : '')}</h1>
+        <div class="stage" style="padding:20px 16px">
+          <div class="timer-row"><span class="lbl">Tiempo</span>
+            <span class="timer-num" id="rtnum">${Math.ceil(E.remaining() / 1000)}</span></div>
+          <div class="timer"><div class="timer-fill" id="rtfill" style="width:100%"></div></div>
+          <div class="timer-row" style="margin:0"><span class="lbl">Respondieron</span>
+            <span class="timer-num" id="rnA" style="font-size:26px;color:#fff">${nA}<small style="font-size:14px;color:var(--muted-dark)"> de ${nP}</small></span></div>
+          <div class="progress"><i id="rpfill" style="width:${pct}%"></i></div>
+        </div>
+        <button class="btn btn-primary btn-lg" id="bGo" style="width:100%;margin-top:12px">Cerrar la pregunta ahora</button>
+        <button class="btn btn-lg" id="bEnd" style="width:100%;margin-top:8px">Terminar y mostrar el ranking</button>
+        ${jumpList(list, q, idx)}`;
+      document.getElementById('bGo').onclick = () => E.closeQuestion();
+      document.getElementById('bEnd').onclick = () => {
+        if (confirm('¿Terminar la competencia y mostrar el ranking?')) E.endGame();
+      };
+      paintClock();
+
+    } else if (q.state === 'rev') {
+      const rs = S.answers[qid] || {};
+      const counts = ((it && it.options) || []).map(() => 0);
+      Object.keys(rs).forEach(p => { const c = rs[p].c; if (counts[c] !== undefined) counts[c]++; });
+      const correct = S.sec[qid];
+      const rank = E.computeRank();
+      w.innerHTML = `
+        <p class="eyebrow">Pregunta ${idx + 1} de ${list.length} · ${nA} de ${nP} respondieron</p>
+        <h1 class="join-q sm" style="margin-bottom:14px">${esc(it ? it.question : '')}</h1>
+        <div class="stage" style="padding:20px 16px">
+          <div class="tiles">
+            ${((it && it.options) || []).map((o, i) =>
+              `<div class="tile t${i} ${i === correct ? 'right' : 'dim'}">
+                 <span class="k">${'ABCDEF'[i]}</span><span>${esc(o)}</span><span class="cnt">${counts[i]}</span></div>`).join('')}
+          </div>
+          <p class="eyebrow" style="color:var(--muted-dark);margin:20px 0 10px">Posiciones</p>
+          ${rankTable(rank.slice(0, 8), null)}
+        </div>
+        <button class="btn btn-primary btn-lg" id="bGo" style="width:100%;margin-top:12px">
+          ${last ? 'Mostrar el ranking final' : 'Siguiente pregunta'}</button>
+        ${last ? '' : '<button class="btn btn-lg" id="bEnd" style="width:100%;margin-top:8px">Terminar acá</button>'}
+        ${jumpList(list, q, idx)}`;
+      document.getElementById('bGo').onclick = () => last ? E.endGame() : E.startQuestion(idx + 1);
+      const be = document.getElementById('bEnd');
+      if (be) be.onclick = () => { if (confirm('¿Terminar la competencia y mostrar el ranking?')) E.endGame(); };
+
+    } else {
+      const rank = E.computeRank();
+      w.innerHTML = `
+        <p class="eyebrow">${esc(q.title || '')}</p>
+        <h1 class="join-q sm" style="margin-bottom:14px">Ranking final</h1>
+        <div class="stage" style="padding:20px 16px">
+          ${podium(rank)}
+          ${rankTable(rank.slice(0, 12), null)}
+        </div>
+        <button class="btn btn-primary btn-lg" id="bGo" style="width:100%;margin-top:12px">Volver a la sala de espera</button>
+        <button class="btn btn-lg" id="bWipe" style="width:100%;margin-top:8px">Borrar puntajes y empezar de cero</button>
+        ${jumpList(list, q, idx)}`;
+      document.getElementById('bGo').onclick = () => E.backToLobby(false);
+      document.getElementById('bWipe').onclick = () => {
+        if (!confirm('Se borran los jugadores y todos los puntajes.')) return;
+        E.backToLobby(true);
+      };
+    }
+
+    w.querySelectorAll('[data-jump]').forEach(b => {
+      b.onclick = () => {
+        if (S.quiz.state === 'q') return toast('Cerrá la pregunta abierta antes de moverte');
+        qref.child('i').set(parseInt(b.dataset.jump, 10) || 0);
+      };
+    });
+  }
 }
 
 /* ---------------------------------------------------------------
@@ -1339,6 +1659,7 @@ function renderPlay(code) {
 window.QUIZ = {
   home: function () { sync(); renderHome(); },
   host: function (code) { sync(); renderHostQuiz(code); },
+  remote: function (code) { sync(); renderRemoteQuiz(code); },
   play: function (code) { sync(); renderPlay(code); }
 };
 
