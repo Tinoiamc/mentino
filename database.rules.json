@@ -50,7 +50,6 @@
         }
       }
     },
-
     "quizzes": {
       "$code": {
         ".read": true,
@@ -92,6 +91,46 @@
       }
     },
     "qmine": {
+      "$uid": {
+        ".read": "auth != null && $uid === auth.uid",
+        ".write": "auth != null && $uid === auth.uid"
+      }
+    },
+    "carteras": {
+      "$code": {
+        ".read": true,
+        ".write": "auth != null && (data.exists() ? data.child('owner').val() === auth.uid : newData.child('owner').val() === auth.uid)"
+      }
+    },
+    "cplayers": {
+      "$code": {
+        ".read": "auth != null && root.child('carteras').child($code).child('owner').val() === auth.uid",
+        ".write": "auth != null && root.child('carteras').child($code).child('owner').val() === auth.uid",
+        "$pid": {
+          ".write": "root.child('carteras').child($code).exists() && $pid.length >= 8 && $pid.length <= 40",
+          ".validate": "newData.hasChildren(['n']) && newData.child('n').isString() && newData.child('n').val().length >= 2 && newData.child('n').val().length <= 24"
+        }
+      }
+    },
+    "cans": {
+      "$code": {
+        ".read": "auth != null && root.child('carteras').child($code).child('owner').val() === auth.uid",
+        ".write": "auth != null && root.child('carteras').child($code).child('owner').val() === auth.uid",
+        "$sk": {
+          "$pid": {
+            ".write": "!data.exists() && root.child('carteras').child($code).child('live').child('st').val() === 'q' && root.child('carteras').child($code).child('live').child('sk').val() === $sk",
+            ".validate": "newData.hasChildren(['c', 'ms']) && newData.child('c').isNumber() && newData.child('c').val() >= 0 && newData.child('c').val() <= 2 && newData.child('ms').isNumber() && root.child('cplayers').child($code).child($pid).exists()"
+          }
+        }
+      }
+    },
+    "crank": {
+      "$code": {
+        ".read": true,
+        ".write": "auth != null && root.child('carteras').child($code).child('owner').val() === auth.uid"
+      }
+    },
+    "cmine": {
       "$uid": {
         ".read": "auth != null && $uid === auth.uid",
         ".write": "auth != null && $uid === auth.uid"

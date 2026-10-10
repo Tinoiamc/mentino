@@ -27,7 +27,7 @@ nube hace falta un lugar compartido donde escribir. Eso lo aporta Firebase.
 3. Ponele un nombre, por ejemplo `sala`. Marcá **Public**. Creá el repositorio.
 4. En la pantalla que aparece, hacé clic en **uploading an existing file**.
 5. Arrastrá los archivos de esta carpeta: `index.html`, `styles.css`, `app.js`, `config.js`,
-   `quiz.js`, `quiz.css`, `database.rules.json`, `README.md`. Abajo, **Commit changes**.
+   `quiz.js`, `quiz.css`, `cartera.js`, `cartera.css`, `database.rules.json`, `README.md`. Abajo, **Commit changes**.
 6. Andá a la pestaña **Settings** del repositorio → menú izquierdo **Pages**.
 7. En *Source* elegí **Deploy from a branch**; en *Branch* elegí `main` y la carpeta `/ (root)`.
    **Save**.
@@ -101,14 +101,16 @@ suelen seguir usando la copia guardada de `app.js`. Por eso los enlaces de `inde
 número de versión:
 
 ```html
-<link rel="stylesheet" href="styles.css?v=9">
-<link rel="stylesheet" href="quiz.css?v=9">
-<script src="config.js?v=9"></script>
-<script src="quiz.js?v=9"></script>
-<script src="app.js?v=9"></script>
+<link rel="stylesheet" href="styles.css?v=10">
+<link rel="stylesheet" href="quiz.css?v=10">
+<link rel="stylesheet" href="cartera.css?v=10">
+<script src="config.js?v=10"></script>
+<script src="quiz.js?v=10"></script>
+<script src="cartera.js?v=10"></script>
+<script src="app.js?v=10"></script>
 ```
 
-**Cada vez que subas una versión nueva, cambiá ese número en los cinco enlaces** (de `v=9` a `v=10`,
+**Cada vez que subas una versión nueva, cambiá ese número en los siete enlaces** (de `v=10` a `v=11`,
 y así). Con eso, todos los dispositivos descargan la copia nueva la primera vez que entran.
 El número que muestra la pantalla de ingreso sale de la constante `BUILD`, arriba de `app.js`:
 conviene moverla junto con los enlaces.
@@ -204,12 +206,8 @@ alcanza.
    (más abajo, *Cargar las preguntas desde una plantilla*). Las
    preguntas se reordenan **arrastrándolas** en la lista, o con las flechas ↑ ↓ de cada una.
 
-   El editor **se guarda solo**: no hay botón que apretar. Mientras escribís, debajo del editor
-   dice *Guardando…* y después *Guardado*; si a una encuesta todavía le faltan opciones con texto,
-   lo avisa ahí mismo. Podés cargar una pregunta atrás de otra sin frenarte en cada una.
-
    El enunciado no tiene tope de caracteres: el campo crece mientras escribís y **Enter** hace un
-   salto de línea. En la pantalla proyectada y
+   salto de línea (para guardar sin soltar el teclado, **Ctrl+Enter**). En la pantalla proyectada y
    en el celular del público la tipografía se achica sola hasta que la pregunta entra completa, así
    que una consigna larga se acomoda al espacio en lugar de recortarse. Lo mismo vale para las
    opciones de una encuesta y para el nombre de la sesión.
@@ -243,9 +241,6 @@ computadora en modo *Presentar*: el proyector obedece lo que tocás en el teléf
 
 Lo que hagas ahí se refleja en la pantalla proyectada al instante. Ese QR es solo para vos: quien
 lo escanee sin tu contraseña no entra. El del público sigue siendo el otro, el de arriba.
-
-El **modo competitivo tiene su propio control**, con el mismo QR en la barra lateral de su panel.
-Está más abajo, en *Modo competitivo*.
 
 Si además de esto tenés diapositivas de PowerPoint, lo más cómodo es:
 
@@ -334,15 +329,60 @@ directo a `TU-SITIO/#/comp`.
 - El público entra con el código de seis caracteres por la misma dirección que las encuestas:
   la aplicación se da cuenta sola de si ese código es de una sesión o de una competencia.
 - Las preguntas se cargan de a una o con **Cargar plantilla**, marcando la correcta con `*`.
-  El editor se guarda solo, igual que en las encuestas: escribís la pregunta, marcás la correcta
-  y pasás a la siguiente sin apretar nada.
-- **Control desde el celular**: en la barra lateral del panel, *Control desde el celular →
-  Mostrar el QR de control*. Escaneado con tu teléfono te abre una pantalla chica con el tiempo
-  que queda, cuántos contestaron, y los botones para empezar, cerrar la pregunta, pasar a la
-  siguiente, terminar y mostrar el ranking o volver a la sala de espera. Entre pregunta y
-  pregunta ves qué opción era la correcta, cómo se repartieron las respuestas y las posiciones.
-  La computadora sigue proyectando; el teléfono solo maneja. Con una pregunta abierta no deja
-  saltar a otra, para no moverle el piso a quien está contestando.
+
+---
+
+## Armá tu cartera (ejercicio guiado)
+
+El ejercicio de `arma-tu-cartera.html`, jugado por toda la sala a la vez y guiado por vos desde el
+celular. Se entra desde **Modo competitivo → Armá tu cartera**, o directo a `TU-SITIO/#/cartera`.
+El público entra con el mismo código de seis caracteres y la misma dirección que todo lo demás.
+
+**Los diez pasos.** Tres preguntas de perfil, la elección de cartera y seis rondas de decisiones
+(años 2 a 10). Cada paso tiene reloj: se abre, se cierra solo al terminar el tiempo (o antes, con
+*Cerrar ya*) y la pantalla muestra qué eligió la sala. En las rondas, además, qué pasó, los
+rendimientos de esos años y la plata promedio de cada cartera. Después del paso de la cartera, la
+pantalla muestra en barras el perfil que sugirió el cuestionario contra la cartera que eligieron.
+
+**El perfil sugiere, cada uno elige.** El celular muestra la cartera sugerida, pero se puede elegir
+cualquiera de las tres.
+
+**Cómo se gana.** Hay cuatro rankings: mejor cartera conservadora, moderada, agresiva y de la sala.
+Gana la plata final; a igual plata, el que contestó más rápido (se suman los tiempos de la elección
+de cartera y de las seis rondas). Quien no contesta una ronda queda como *no hizo nada* y su cartera
+sigue andando, pero **no entra al ranking**: para competir hay que elegir cartera y contestar las seis
+rondas. Así alguien que dejó la pestaña abierta sin jugar no puede ganar.
+
+**Azar.** Cada sala juega un mercado distinto: los rendimientos de los años 3 a 10 varían un poco
+alrededor de los de referencia. Todos en la misma sala viven el mismo mercado, como en la realidad,
+así que lo que separa a los jugadores son las decisiones y, a igualdad, la velocidad. Al crear o
+reiniciar la sala, el panel descarta los sorteos en los que el mejor resultado posible no queda
+en el orden agresiva, moderada, conservadora. Los números que citan los textos (la caída del año 1,
+el 26% del año 2 y el −60% de la acción del dato) no cambian.
+
+**Cambios respecto del HTML original.** La compra del año 2 pasó de "la mitad del money market" a
+"un 10% de la cartera": con la versión anterior, la conservadora con las mejores decisiones
+terminaba arriba de la agresiva. El texto de "qué pasó" en los años 9 y 10 dice ahora "Un año en
+rojo y otro bueno", que es lo que muestran esos dos años.
+
+**Durante la charla**
+
+1. Creá la sala y abrí el panel en la computadora que proyecta. **Presentar** lo pone en pantalla
+   completa.
+2. **Control desde el celular** muestra un QR solo para vos: escanealo y manejás todo desde el teléfono
+   (avanzar, volver, cerrar, reabrir y, al final, revelar cada ranking). En el teléfono ves las
+   respuestas antes que la sala, y los podios antes de revelarlos.
+3. En el panel también funcionan las flechas ← → y la barra espaciadora (cierra la pregunta).
+4. Después de la última ronda, *Ir a los rankings*: cada categoría arranca con 3, 2, 1 y el podio se
+   revela de abajo hacia arriba. Al terminar, cada celular muestra su puesto y su análisis completo.
+5. **CSV** baja una fila por persona: perfil, cartera, cada respuesta, tiempo, plata final y puestos.
+
+**Ajustes** permite cambiar los segundos por pregunta (25 por defecto; la elección de cartera suma
+15), reiniciar la sala (borra las respuestas, conserva a los anotados y sortea otro mercado) y
+borrarla.
+
+El consumo es el mismo que el del modo competitivo: los textos y las cuentas viven en `cartera.js`,
+así que por la base solo viajan el paso activo, unas diez respuestas por persona y la tabla final.
 
 ---
 
@@ -400,6 +440,8 @@ styles.css            estilos
 app.js                la lógica de las nubes, las encuestas y las plantillas
 quiz.js               la lógica del modo competitivo
 quiz.css              estilos propios del modo competitivo
+cartera.js            Armá tu cartera (ejercicio guiado del modo competitivo)
+cartera.css           sus estilos, con la estética de BYMAEDUCA
 config.js             lo único que tenés que editar
 database.rules.json   reglas de seguridad para pegar en Firebase
 ```
@@ -410,4 +452,5 @@ presta por `window.ENC`. Por eso `quiz.js` va **antes** que `app.js` en `index.h
 
 > Si ya tenías publicada una versión anterior, volvé a pegar `database.rules.json` en la
 > consola de Firebase: ahora incluye los nodos del modo competitivo (`quizzes`, `qsec`,
-> `qplayers`, `qa`, `qrank`, `qmine`). Sin eso, la competencia no guarda nada.
+> `qplayers`, `qa`, `qrank`, `qmine`) y los de Armá tu cartera (`carteras`, `cplayers`, `cans`,
+> `crank`, `cmine`). Sin eso, la competencia y el ejercicio no guardan nada.

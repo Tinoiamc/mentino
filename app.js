@@ -9,7 +9,7 @@
 /* ---------------------------------------------------------------
    1. Utilidades
    --------------------------------------------------------------- */
-const BUILD = '9';   // subilo cada vez que actualices el sitio (ver README)
+const BUILD = '10';   // subilo cada vez que actualices el sitio (ver README)
 const APP = () => document.getElementById('app');
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
   c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -406,7 +406,9 @@ window.ENC = {
       const a = await db.ref('sessions/' + c + '/owner').get();
       if (a.exists()) continue;
       const b = await db.ref('quizzes/' + c + '/owner').get();
-      if (!b.exists()) return c;
+      if (b.exists()) continue;
+      const k = await db.ref('carteras/' + c + '/owner').get();
+      if (!k.exists()) return c;
     }
     throw new Error('No pudimos generar un código libre. Probá otra vez.');
   },
@@ -858,6 +860,7 @@ window.TPL = {
 function route() {
   detachAll();
   document.body.classList.remove('present');
+  document.body.classList.remove('ct-mode');
   const raw = location.hash.replace(/^#\/?/, '').split('?')[0];
   const parts = raw.split('/').filter(Boolean);
   if (!parts.length) {
@@ -882,12 +885,23 @@ function route() {
       APP().innerHTML = '<div class="setup"><p class="muted">Abriendo el panel…</p></div>';
       return withAuth(() => window.QUIZ.host(cq));
     }
-    if (parts[1] === 'remoto' && parts[2]) {
-      const cr = parts[2].toUpperCase();
-      APP().innerHTML = '<div class="setup"><p class="muted">Abriendo el control…</p></div>';
-      return withAuth(() => window.QUIZ.remote(cr));
-    }
     return window.QUIZ.play(parts[1].toUpperCase());
+  }
+  /* Armá tu cartera (cartera.js): ejercicio guiado del modo competitivo.
+     #/cartera             portada (crear y listar salas)
+     #/cartera/host/CODE   pantalla proyectada
+     #/cartera/ctrl/CODE   control desde el celular del presentador
+     #/cartera/CODE        pantalla del participante (el público entra por #/CODE) */
+  if (parts[0] === 'cartera') {
+    if (!window.CARTERA) {
+      return renderFatal('Falta el módulo Armá tu cartera',
+        'No se cargó cartera.js. Copialo al lado de index.html y recargá la página.');
+    }
+    const cc = (parts[2] || '').toUpperCase();
+    if (!parts[1]) return withAuth(() => window.CARTERA.home());
+    if (parts[1] === 'host' && cc) return withAuth(() => window.CARTERA.host(cc));
+    if (parts[1] === 'ctrl' && cc) return withAuth(() => window.CARTERA.ctrl(cc));
+    return window.CARTERA.play(parts[1].toUpperCase());
   }
   if (parts[0] === 'remoto' && parts[1]) {
     const c = parts[1].toUpperCase();
@@ -1075,8 +1089,7 @@ function dbMsg(e) {
    8. Panel del anfitrión
    --------------------------------------------------------------- */
 function renderHost(code) {
-  const state = { code, session: null, responses: {}, seen: new Set(), qrDone: false,
-                  edTouch: 0, edTimer: null };
+  const state = { code, session: null, responses: {}, seen: new Set(), qrDone: false };
 
   APP().innerHTML = topbar('', '') + `<div class="host"><div class="rail"></div>
     <div class="stage-wrap"><div class="stage"><p class="empty">Cargando…</p></div></div></div>
@@ -1192,20 +1205,12 @@ function renderHost(code) {
     const remoteUrl = baseUrl() + '#/remoto/' + code;
     const n = Object.keys(state.responses || {}).length;
 
-    /* Solo se reconstruye si cambió algo estructural: qué preguntas hay, de
-       qué tipo y cuál está activa. El texto se actualiza en el lugar, porque
-       ahora el editor guarda mientras escribís y rehacer la barra en cada
-       tecla redibujaría el QR. */
-    const sig = activeId + '|' + list.map(([id, it]) => id + it.type).join('~') +
+    // Solo se reconstruye si cambió algo estructural; si no, se actualiza el contador.
+    const sig = activeId + '|' + list.map(([id, it]) => id + it.type + it.question).join('~') +
                 '|' + (state.session.banned || '') + '|' + (state.session.phoneResults !== false);
     if (rail.dataset.sig === sig) {
       const c = document.getElementById('cnt');
       if (c) c.innerHTML = `<b>${n}</b><span>${n === 1 ? 'respuesta' : 'respuestas'} en esta pregunta</span>`;
-      list.forEach(([id, it]) => {
-        const el = rail.querySelector('[data-id="' + id + '"] .slide-q');
-        const txt = it.question || 'Sin pregunta';
-        if (el && el.textContent !== txt) el.textContent = txt;
-      });
       return;
     }
     rail.dataset.sig = sig;
@@ -1446,27 +1451,15 @@ function renderHost(code) {
   }
 
   /* ---- editor ---- */
-  /* Se guarda solo, sin botón. Mientras escribís, lo que vuelve de la base
-     es casi siempre lo que vos mismo acabás de guardar: rehacer el editor
-     con eso te movería el cursor a la mitad de una palabra. Por eso,
-     mientras hay alguien escribiendo, el editor no se toca. */
-  function editing() {
-    const ed = document.querySelector('.editor');
-    return !!(ed && (ed.contains(document.activeElement) || Date.now() - (state.edTouch || 0) < 2500));
-  }
-
   function paintEditor(item, itemId) {
     const wrap = document.querySelector('.stage-wrap');
     let ed = wrap.querySelector('.editor');
     if (!ed) { wrap.insertAdjacentHTML('beforeend', '<div class="editor"></div>'); ed = wrap.querySelector('.editor'); }
-    if (!item) { ed.innerHTML = ''; ed.dataset.sig = ''; ed.dataset.qid = ''; return; }
+    if (!item) { ed.innerHTML = ''; ed.dataset.sig = ''; return; }
 
     const sigE = itemId + '|' + JSON.stringify(item);
-    if (ed.dataset.sig === sigE) return;
-    if (ed.dataset.qid === itemId && editing()) { ed.dataset.sig = sigE; return; }
-    clearTimeout(state.edTimer);
+    if (ed.dataset.sig === sigE) return;   // no pisar lo que se está escribiendo
     ed.dataset.sig = sigE;
-    ed.dataset.qid = itemId;
 
     const isCloud = item.type === 'cloud';
     ed.innerHTML = `
@@ -1479,7 +1472,7 @@ function renderHost(code) {
         <label for="eQ">Pregunta</label>
         <textarea class="input ta-auto" id="eQ" rows="2"
           placeholder="Escribí la pregunta, del largo que necesites">${esc(item.question || '')}</textarea>
-        <p class="muted" style="font-size:12px;margin:5px 0 0">Sin límite de caracteres. Enter hace un salto de línea.</p>
+        <p class="muted" style="font-size:12px;margin:5px 0 0">Sin límite de caracteres. Enter hace un salto de línea; Ctrl+Enter guarda.</p>
       </div>
       ${isCloud ? `
       <div class="two-col">
@@ -1508,21 +1501,15 @@ function renderHost(code) {
       <label class="check"><input type="checkbox" id="eHide" ${item.hideResults ? 'checked' : ''}>
         <span>Ocultar los resultados hasta que la persona responda
         <small>El público ve la nube o los porcentajes recién después de enviar su respuesta.</small></span></label>
-      <div class="btn-row" style="margin-top:16px;align-items:center">
+      <div class="btn-row" style="margin-top:16px">
+        <button class="btn btn-primary" id="eSave">Guardar cambios</button>
         <button class="btn" id="eReset">Borrar las respuestas de esta pregunta</button>
-        <span class="muted" id="eState" style="font-size:12.5px">Se guarda solo mientras escribís.</span>
       </div>`;
-
-    const say = txt => { const el = document.getElementById('eState'); if (el) el.textContent = txt; };
 
     if (!isCloud) {
       const box = document.getElementById('eOpts');
       const wire = () => box.querySelectorAll('[data-rm]').forEach(b => {
-        b.onclick = () => {
-          if (box.children.length <= 2) return toast('Tiene que haber al menos dos opciones');
-          b.parentElement.remove();
-          save(true);
-        };
+        b.onclick = () => { if (box.children.length > 2) b.parentElement.remove(); else toast('Tiene que haber al menos dos opciones'); };
       });
       wire();
       document.getElementById('eAdd').onclick = () => {
@@ -1530,48 +1517,30 @@ function renderHost(code) {
         box.insertAdjacentHTML('beforeend', optRow('', box.children.length));
         wire();
         wireAutoGrow(box);
-        state.edTouch = Date.now();
-        box.lastElementChild.querySelector('.input').focus();
       };
     }
 
     wireAutoGrow(ed);
+    const qBox = document.getElementById('eQ');
+    qBox.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); document.getElementById('eSave').click(); }
+    });
 
-    /* Las opciones vacías no se guardan, pero tampoco se borran de la
-       pantalla mientras las estás escribiendo. */
-    function run() {
-      if (!ed.isConnected || ed.dataset.qid !== itemId) return;   // cambiaste de pregunta
+    document.getElementById('eSave').onclick = () => {
       const up = { question: cleanQuestion(document.getElementById('eQ').value) || 'Sin pregunta',
                    hideResults: document.getElementById('eHide').checked };
-      let falta = '';
       if (isCloud) {
         up.maxWords = parseInt(document.getElementById('eMax').value, 10);
         up.filter = document.getElementById('eFil').value;
       } else {
         const opts = Array.from(document.querySelectorAll('#eOpts .input'))
           .map(i => i.value.replace(/\s+/g, ' ').trim()).filter(Boolean);
-        if (opts.length >= 2) up.options = opts; else falta = ' · faltan opciones con texto';
+        if (opts.length < 2) return toast('Tiene que haber al menos dos opciones');
+        up.options = opts;
         up.multi = document.getElementById('eMulti').checked;
       }
-      sref.child('items/' + itemId).update(up)
-        .then(() => say('Guardado' + falta))
-        .catch(e => say(dbMsg(e)));
-    }
-
-    function save(now) {
-      state.edTouch = Date.now();
-      clearTimeout(state.edTimer);
-      say('Guardando…');
-      if (now) return run();
-      state.edTimer = setTimeout(run, 600);
-      waits.push(state.edTimer);
-    }
-
-    /* Propiedad y no addEventListener: el editor se repinta muchas veces y
-       así nunca quedan dos escuchas encima del mismo campo. */
-    ed.oninput = () => save(false);
-    ed.onchange = () => save(true);
-
+      sref.child('items/' + itemId).update(up).then(() => toast('Cambios guardados'));
+    };
     document.getElementById('eReset').onclick = () => {
       if (!confirm('Se borran todas las respuestas de esta pregunta.')) return;
       db.ref('tally/' + code + '/' + itemId).remove();
@@ -1581,8 +1550,6 @@ function renderHost(code) {
       const list = itemsSorted(state.session);
       if (list.length < 2) return toast('La sesión necesita al menos una pregunta');
       if (!confirm('Se elimina la pregunta y sus respuestas.')) return;
-      clearTimeout(state.edTimer);
-      state.edTouch = 0;
       const other = list.find(([id]) => id !== itemId)[0];
       db.ref('responses/' + code + '/' + itemId).remove();
       db.ref('tally/' + code + '/' + itemId).remove();
@@ -1863,6 +1830,10 @@ function renderJoin(code) {
       let q = null;
       try { q = await restGet('quizzes/' + code); } catch (e) { q = null; }
       if (q && window.QUIZ) return window.QUIZ.play(code);
+      /* ...o el de un "Armá tu cartera". */
+      let k = null;
+      if (!q && window.CARTERA) { try { k = await restGet('carteras/' + code + '/title'); } catch (e) { k = null; } }
+      if (k !== null && k !== undefined) return window.CARTERA.play(code);
       return fail('No encontramos nada con el código ' + code + '. Revisalo con quien está presentando.');
     }
     st.s = s;
