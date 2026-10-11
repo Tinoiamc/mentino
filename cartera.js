@@ -126,6 +126,8 @@ function pct(n) {
   const s = Math.abs(n).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   return (n > 0 ? '+' : n < 0 ? '−' : '') + s + '%';
 }
+/* Resultado como porcentaje del capital inicial de $100.000. */
+function vpct(v) { return pct(v / 1000 - 100); }
 function secsTxt(ms) {
   return (ms / 1000).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' s';
 }
@@ -210,7 +212,10 @@ const PROFILES = {
 };
 const PERSON = { cons: 'Conservador', mod: 'Moderado', agr: 'Agresivo' };
 const BAD  = { mm: 0, rf: -10, ar: -45, etf: -39, tip: 0 };
-const GOOD = { mm: 2, rf: 12,  ar: 50,  etf: 30,  tip: 0 };
+/* Año "bueno" de referencia, solo para las tarjetas de elección de cartera.
+   El +28% del CEDEAR es el mejor retorno total real del S&P 500 entre 2004 y
+   2025 (2013, +27,8%). */
+const GOOD = { mm: 2, rf: 12,  ar: 50,  etf: 28,  tip: 0 };
 const YEAR1 = BAD;
 
 const PERFIL = [
@@ -682,13 +687,15 @@ function finalHTML(cart, picks, mk) {
   });
   h += '</div></div>';
   h += '<div class="card quote"><p class="q">Lo que elegís de antemano es la mezcla, no el año.</p>' +
-       '<p class="s">96 años del S&amp;P 500: 71 positivos, 25 negativos, ninguno anunciado.</p></div>';
+       '<p class="s">98 años del S&amp;P 500: 72 positivos, 26 negativos, ninguno anunciado.</p></div>';
   return h;
 }
 
 const FOOT = `<p class="fine ct-legal">Supuestos con fines educativos, sin comisiones ni impuestos. Todo está medido en
-  poder de compra. El CEDEAR de ETF usa los extremos del S&amp;P 500 de 2004–2025: −39% en 2008 y +30% en 2024.
-  Las demás variaciones son del ejercicio, no datos históricos, y cada sala juega una variante al azar.
+  poder de compra. El CEDEAR de ETF usa los extremos del S&amp;P 500 entre 2004 y 2025, medidos como retorno total
+  descontada la inflación: −39% en 2008 y +28% en 2013. Se supone tipo de cambio real constante, es decir que el
+  CEDEAR rinde en pesos constantes lo mismo que el índice en dólares constantes. Las demás variaciones son del
+  ejercicio, no datos históricos, y cada sala juega una variante al azar.
   Ejercicio educativo de BYMAEDUCA: no es una recomendación de inversión.</p>`;
 
 /* ---------------------------------------------------------------
@@ -696,7 +703,15 @@ const FOOT = `<p class="fine ct-legal">Supuestos con fines educativos, sin comis
    --------------------------------------------------------------- */
 const DEF_SECS = 25;
 const PICK_EXTRA = 15;        // la elección de cartera tiene más para leer
-const stepSecs = (c, s) => (c.secs || DEF_SECS) + (s === PICK_STEP ? PICK_EXTRA : 0);
+/* Segundos de un paso: el valor propio si el presentador lo fijó en Ajustes,
+   si no el general (más un extra en la elección de cartera, que tiene más
+   para leer). */
+function stepSecs(c, s) {
+  const by = (c && c.secsBy) || {};
+  const v = by['s' + s];
+  if (typeof v === 'number' && v >= 5) return v;
+  return ((c && c.secs) || DEF_SECS) + (s === PICK_STEP ? PICK_EXTRA : 0);
+}
 
 function lobbyLive(seed, secs) {
   return { st: 'lobby', step: -1, sk: '', at: 0, secs: secs || DEF_SECS, seed: seed, rc: -1, rat: 0 };
@@ -893,6 +908,7 @@ function hostCore(code, paint) {
     return 'Terminado';
   };
   H.setSecs = secs => cref.update({ secs: secs }).catch(fail);
+  H.setTimes = by => cref.child('secsBy').set(by && Object.keys(by).length ? by : null).catch(fail);
   H.reset = () => {
     const seed = pickSeed();
     return Promise.all([db.ref('cans/' + code).remove(), db.ref('crank/' + code).remove()])
@@ -943,14 +959,20 @@ function renderHost(code) {
       <p class="fine mono">${esc(ctrlUrl)}</p>
       <div class="row"><button class="btn small ghost" id="cpc">Copiar link</button><button class="btn small" id="xctl">Cerrar</button></div>
     </div></div>
-    <div class="modal" id="mset" hidden><div class="modal-in">
-      <h3>Ajustes</h3>
-      <label class="fine" for="secs">Segundos por pregunta (la elección de cartera suma ${PICK_EXTRA})</label>
-      <select class="in" id="secs">${[15, 20, 25, 30, 40, 50, 60].map(s => `<option value="${s}">${s} segundos</option>`).join('')}</select>
-      <div class="row" style="margin-top:16px"><button class="btn small ghost" id="breset">Reiniciar la sala</button>
+    <div class="modal" id="mset" hidden><div class="modal-in wide">
+      <h3>Tiempos</h3>
+      <label class="fine" for="secs">Tiempo general por pregunta</label>
+      <select class="in" id="secs">${[10, 15, 20, 25, 30, 40, 50, 60, 90].map(s => `<option value="${s}">${s} segundos</option>`).join('')}</select>
+      <p class="fine" style="margin:14px 0 2px">Tiempo propio de cada paso, en segundos. Vacío usa el general
+        (la elección de cartera le suma ${PICK_EXTRA}). Se aplica cuando el paso se abre.</p>
+      <div class="tset" id="tset"></div>
+      <div class="row" style="margin-top:12px"><button class="btn small" id="bsave">Guardar los tiempos</button>
+        <button class="btn small ghost" id="bdef">Usar el general en todos</button></div>
+      <hr class="sep">
+      <div class="row" style="margin-top:0"><button class="btn small ghost" id="breset">Reiniciar la sala</button>
         <button class="btn small ghost" id="bdel">Borrar la sala</button></div>
       <p class="fine" style="margin-top:8px">Reiniciar borra las respuestas, conserva a los anotados y sortea un mercado nuevo.</p>
-      <div class="row"><button class="btn small" id="xset">Cerrar</button></div>
+      <div class="row"><button class="btn small ghost" id="xset">Cerrar</button></div>
     </div></div>`, {
     cls: 'is-host light',
     sub: 'Armá tu cartera · <code>' + code + '</code>',
@@ -984,9 +1006,28 @@ function renderHost(code) {
   };
   $('xctl').onclick = () => { $('mctl').hidden = true; };
   $('cpc').onclick = () => copy(ctrlUrl);
-  $('bset').onclick = () => { $('mset').hidden = false; $('secs').value = String((H.c && H.c.secs) || DEF_SECS); };
+  function paintTset() {
+    const by = (H.c && H.c.secsBy) || {};
+    $('tset').innerHTML = STEPS.map((_, i) => `<label class="trow"><span>${esc(stepLabel(i))}</span>
+      <input class="in" type="number" min="5" max="300" step="5" data-s="${i}"
+             placeholder="${stepSecs(H.c, i)}" value="${typeof by['s' + i] === 'number' ? by['s' + i] : ''}"></label>`).join('');
+  }
+  $('bset').onclick = () => {
+    $('mset').hidden = false;
+    $('secs').value = String((H.c && H.c.secs) || DEF_SECS);
+    paintTset();
+  };
   $('xset').onclick = () => { $('mset').hidden = true; };
   $('secs').onchange = e => H.setSecs(parseInt(e.target.value, 10) || DEF_SECS);
+  $('bsave').onclick = () => {
+    const by = {};
+    $('tset').querySelectorAll('input[data-s]').forEach(inp => {
+      const v = parseInt(inp.value, 10);
+      if (v >= 5 && v <= 300) by['s' + inp.dataset.s] = v;
+    });
+    H.setTimes(by).then(() => toast('Tiempos guardados'));
+  };
+  $('bdef').onclick = () => H.setTimes(null).then(() => { paintTset(); toast('Todos los pasos usan el tiempo general'); });
   $('breset').onclick = function () {
     if (this.dataset.sure !== '1') { this.dataset.sure = '1'; this.textContent = '¿Seguro? Tocá de nuevo'; return; }
     this.dataset.sure = ''; this.textContent = 'Reiniciar la sala';
@@ -1124,25 +1165,43 @@ function renderHost(code) {
         ${yearsTable(S.i, res.mk)}
         <p class="eyebrow" style="margin-top:18px">Promedio de la sala al cierre de ${esc(R.yr.toLowerCase())}</p>
         <div class="avgs">${ORDER.map(k => avg[k]
-          ? `<div><span>${esc(PROFILES[k].name)}</span><b class="${avg[k].v < 100000 ? 'neg' : 'pos'}">${fmt(avg[k].v)}</b><small>${avg[k].n} ${avg[k].n === 1 ? 'cartera' : 'carteras'}</small></div>`
+          ? `<div><span>${esc(PROFILES[k].name)}</span><b class="${avg[k].v < 100000 ? 'neg' : 'pos'}">${fmt(avg[k].v)} <i>${vpct(avg[k].v)}</i></b><small>${avg[k].n} ${avg[k].n === 1 ? 'cartera' : 'carteras'}</small></div>`
           : `<div><span>${esc(PROFILES[k].name)}</span><b class="muted">—</b><small>nadie la eligió</small></div>`).join('')}</div>
       </div></div>`;
   }
 
-  /* Ranking con cuenta regresiva: 3, 2, 1, y el podio de abajo hacia arriba. */
+  /* Ranking con cuenta regresiva: 3, 2, 1, y el podio de abajo hacia arriba.
+
+     El tiempo se mide con el reloj de esta pantalla desde que vio el cambio de
+     categoría, no con la hora del servidor: si el reloj de la máquina está
+     corrido y el ajuste todavía no llegó, una cuenta atada al servidor se
+     queda clavada en el 3. */
+  let revKey = '', revAt = 0;
+  function revealMs(L) {
+    const key = L.rc + ':' + (L.rat || 0);
+    if (key !== revKey) { revKey = key; revAt = Date.now(); }
+    if (!L.rat) return 999999;          // se volvió atrás: queda todo a la vista
+    return Date.now() - revAt;
+  }
+  const CDOWN = 3000, GAP = 1600;
+
   function rankStageHTML(L) {
     const cat = CATS[L.rc] || CATS[0];
     const list = H.results().cats[cat.k] || [];
-    const el = L.rat ? Math.max(0, H.now() - L.rat) : 99999;
+    const ms = revealMs(L);
     const head = `<p class="eyebrow center">${L.rc + 1} de ${CATS.length}</p><h1 class="big center">${esc(cat.t)}</h1>`;
-    if (el < 3000) {
-      const n = 3 - Math.floor(el / 1000);
+    if (ms < CDOWN) {
+      const n = 3 - Math.floor(ms / 1000);
       return `<div class="cd">${head}<div class="cd-n" data-n="${n}">${n}</div></div>`;
     }
-    const shown = el < 3600 ? 0 : el < 5000 ? 1 : el < 6600 ? 2 : 3;
-    return `<div class="rk">${head}${podiumHTML(list, shown, cat.k === 'total')}
-      ${shown >= 3 && list.length > 3 ? `<div class="rest">${list.slice(3, 8).map((r, i) =>
-        `<span><b>${i + 4}°</b> ${esc(r.n)} · ${fmt(r.v)}</span>`).join('')}</div>` : ''}</div>`;
+    /* Se revela de abajo hacia arriba, pero solo los puestos que existen: con
+       dos participantes no se hace esperar por un tercer puesto vacío, y con
+       uno solo el ganador aparece apenas termina la cuenta. */
+    const hay = Math.min(3, list.length);
+    const shown = Math.min(hay, 1 + Math.floor((ms - CDOWN) / GAP));
+    return `<div class="rk">${head}${podiumHTML(list, shown, hay, cat.k === 'total')}
+      ${shown >= hay && list.length > 3 ? `<div class="rest">${list.slice(3, 8).map((r, i) =>
+        `<span><b>${i + 4}°</b> ${esc(r.n)} · ${fmt(r.v)} <i>${vpct(r.v)}</i></span>`).join('')}</div>` : ''}</div>`;
   }
 
   function endHTML() {
@@ -1151,32 +1210,39 @@ function renderHost(code) {
       <div class="endgrid">${CATS.map(c => {
         const l = res.cats[c.k];
         return `<div class="card"><p class="eyebrow">${esc(c.t)}</p>${l.length ? l.slice(0, 3).map((r, i) =>
-          `<div class="erow"><span class="m m${i + 1}">${i + 1}°</span><span class="n">${esc(r.n)}${c.k === 'total' ? ' <small>' + esc(PROFILES[r.cart].name) + '</small>' : ''}</span><b>${fmt(r.v)}</b></div>`).join('')
+          `<div class="erow"><span class="m m${i + 1}">${i + 1}°</span><span class="n">${esc(r.n)}${c.k === 'total' ? ' <small>' + esc(PROFILES[r.cart].name) + '</small>' : ''}</span><b>${fmt(r.v)}<i>${vpct(r.v)}</i></b></div>`).join('')
           : '<p class="fine">Sin participantes en el ranking.</p>'}</div>`;
       }).join('')}</div>${FOOT}`;
   }
 }
 
-/* Podio: shown = cuántos puestos ya se revelaron (3°, después 2°, después 1°). */
-function podiumHTML(list, shown, showCart) {
+/* Podio. `shown` es cuántos puestos ya se revelaron, contando desde el último
+   que existe hacia el primero; `hay` es cuántos puestos hay realmente. */
+function podiumHTML(list, shown, hay, showCart) {
   if (!list.length) return '<p class="lede center" style="margin-top:40px">Nadie de esta cartera completó todas las rondas.</p>';
   const slot = (r, place) => {
-    const vis = (place === 3 && shown >= 1) || (place === 2 && shown >= 2) || (place === 1 && shown >= 3);
-    if (!r) return `<div class="ct-pod p${place} empty"><div class="blk">${place}°</div></div>`;
+    const vis = shown >= (hay - place + 1);
     return `<div class="ct-pod p${place} ${vis ? 'on' : ''}">
       <div class="who">${vis ? `<div class="nm">${esc(r.n)}</div>
-        <div class="vl ${r.v < 100000 ? 'neg' : 'pos'}">${fmt(r.v)}</div>
+        <div class="vl ${r.v < 100000 ? 'neg' : 'pos'}">${fmt(r.v)} <i>${vpct(r.v)}</i></div>
         <div class="sub">${showCart ? esc(PROFILES[r.cart || r.k].name) + ' · ' : ''}${secsTxt(r.t)}</div>` : '<div class="nm hid">?</div>'}</div>
       <div class="blk">${place}°</div></div>`;
   };
-  return `<div class="ct-podium">${slot(list[1], 2)}${slot(list[0], 1)}${slot(list[2], 3)}</div>`;
+  /* Con menos de tres no se dibujan bloques vacíos: el podio se achica. */
+  const inner = hay >= 3 ? slot(list[1], 2) + slot(list[0], 1) + slot(list[2], 3)
+              : hay === 2 ? slot(list[1], 2) + slot(list[0], 1)
+              : slot(list[0], 1);
+  return `<div class="ct-podium n${hay}">${inner}</div>`;
 }
 
 /* ---------------------------------------------------------------
    9. Control desde el celular del presentador
    --------------------------------------------------------------- */
 function renderCtrl(code) {
-  frame(`<main class="ct-wrap" id="cw"><p class="fine">Cargando…</p></main>`, { cls: 'light', sub: 'Control · ' + code });
+  frame(`<main class="ct-wrap" id="cw"><p class="fine">Cargando…</p></main>`, {
+    cls: 'light', sub: 'Control · ' + code,
+    actions: `<a class="btn small ghost" href="#/cartera">Salir al menú</a>`
+  });
   const H = hostCore(code, paint);
   let lastSig = '';
   every(() => {
@@ -1203,7 +1269,7 @@ function renderCtrl(code) {
       body = `<p class="eyebrow">Rankings · ${L.rc + 1} de ${CATS.length}</p><h2>${esc(cat.t)}</h2>
         <p class="fine">En pantalla: cuenta regresiva y podio. Esto solo lo ves vos.</p>
         <div class="card">${l.length ? l.slice(0, 5).map((r, i) =>
-          `<div class="erow"><span class="m m${i + 1}">${i + 1}°</span><span class="n">${esc(r.n)}</span><b>${fmt(r.v)}</b></div>`).join('')
+          `<div class="erow"><span class="m m${i + 1}">${i + 1}°</span><span class="n">${esc(r.n)}</span><b>${fmt(r.v)}<i>${vpct(r.v)}</i></b></div>`).join('')
           : '<p class="fine">Nadie en este ranking.</p>'}</div>`;
     } else {
       body = `<p class="eyebrow">Terminado</p><h2>Rankings publicados</h2>
@@ -1357,10 +1423,10 @@ function renderPlay(code) {
     const me = P.rank && P.rank.sc && P.rank.sc[pid];
     let top = '';
     if (!me) top = `<div class="verdict"><p class="lbl">Terminó</p><p class="name">Gracias por jugar</p></div>`;
-    else if (me.m > 0) top = `<div class="verdict"><p class="lbl">Fuera del ranking</p><p class="name">${fmt(me.v)}</p>
+    else if (me.m > 0) top = `<div class="verdict"><p class="lbl">Fuera del ranking</p><p class="name">${fmt(me.v)} <span class="np">${vpct(me.v)}</span></p>
         <p>Te ${me.m === 1 ? 'faltó 1 respuesta' : 'faltaron ' + me.m + ' respuestas'}: para ganar hay que elegir cartera y contestar las seis rondas.</p></div>`;
     else top = `<div class="verdict"><p class="lbl">Tu puesto</p><p class="name">${me.c}° de ${me.nc}</p>
-        <p>entre las carteras ${esc(PROFILES[me.k].name.toLowerCase())}s · <b>${me.t}° de ${me.nt}</b> en la sala · ${fmt(me.v)}</p></div>`;
+        <p>entre las carteras ${esc(PROFILES[me.k].name.toLowerCase())}s · <b>${me.t}° de ${me.nt}</b> en la sala · ${fmt(me.v)} (${vpct(me.v)})</p></div>`;
     w.innerHTML = top + `<p class="eyebrow">Tu resultado</p>${finalHTML(myCart(), myPicks(6), mk())}${FOOT}`;
   }
 
@@ -1400,7 +1466,7 @@ function renderPlay(code) {
           <div class="picks">${ORDER.map((k, i) => pickCard(k, { tag: 'button', badge: k === pr.key ? 'Sugerida' : '',
             attrs: 'type="button" data-a="' + i + '" aria-pressed="' + (P.sel === i ? 'true' : 'false') + '"' })).join('')}</div>
           <p class="fine" style="margin-top:10px">Todo está medido en poder de compra: la inflación ya está descontada.
-            Por eso el money market rinde negativo casi todos los años.</p>
+            Por eso el money market rinde cero o negativo en ocho de los diez años: la tasa no le gana a los precios.</p>
           <div id="ferr"></div>
           <div class="row"><button class="btn wide" id="gplay" ${P.sel === null ? 'disabled' : ''}>Elegir esta cartera</button></div>`;
         w.querySelectorAll('.pick[data-a]').forEach(b => {

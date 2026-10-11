@@ -9,7 +9,7 @@
 /* ---------------------------------------------------------------
    1. Utilidades
    --------------------------------------------------------------- */
-const BUILD = '10';   // subilo cada vez que actualices el sitio (ver README)
+const BUILD = '12';   // subilo cada vez que actualices el sitio (ver README)
 const APP = () => document.getElementById('app');
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
   c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));

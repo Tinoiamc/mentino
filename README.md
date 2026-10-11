@@ -101,16 +101,16 @@ suelen seguir usando la copia guardada de `app.js`. Por eso los enlaces de `inde
 número de versión:
 
 ```html
-<link rel="stylesheet" href="styles.css?v=10">
-<link rel="stylesheet" href="quiz.css?v=10">
-<link rel="stylesheet" href="cartera.css?v=10">
-<script src="config.js?v=10"></script>
-<script src="quiz.js?v=10"></script>
-<script src="cartera.js?v=10"></script>
-<script src="app.js?v=10"></script>
+<link rel="stylesheet" href="styles.css?v=12">
+<link rel="stylesheet" href="quiz.css?v=12">
+<link rel="stylesheet" href="cartera.css?v=12">
+<script src="config.js?v=12"></script>
+<script src="quiz.js?v=12"></script>
+<script src="cartera.js?v=12"></script>
+<script src="app.js?v=12"></script>
 ```
 
-**Cada vez que subas una versión nueva, cambiá ese número en los siete enlaces** (de `v=10` a `v=11`,
+**Cada vez que subas una versión nueva, cambiá ese número en los siete enlaces** (de `v=12` a `v=13`,
 y así). Con eso, todos los dispositivos descargan la copia nueva la primera vez que entran.
 El número que muestra la pantalla de ingreso sale de la constante `BUILD`, arriba de `app.js`:
 conviene moverla junto con los enlaces.
@@ -365,6 +365,15 @@ el 26% del año 2 y el −60% de la acción del dato) no cambian.
 terminaba arriba de la agresiva. El texto de "qué pasó" en los años 9 y 10 dice ahora "Un año en
 rojo y otro bueno", que es lo que muestran esos dos años.
 
+**Las cifras del S&P 500.** El ejercicio dice que todo está medido en poder de compra, así que las
+tres cifras que atribuye a años concretos son retornos totales reales (con dividendos y descontada la
+inflación): −39% en 2008, +26% en 2009 y +28% en 2013, que son el peor y el mejor año del período
+2004–2025. El pie declara además el supuesto que hace falta para que eso valga acá: tipo de cambio
+real constante, es decir que el CEDEAR rinde en pesos constantes lo mismo que el índice en dólares
+constantes. Es el supuesto más fuerte del modelo; el archivo `metodologia-arma-tu-cartera.md` explica
+cuánto cambia el resultado si no se cumple. Los mismos textos se corrigieron en
+`arma-tu-cartera.html`, el ejercicio individual del que salió este.
+
 **Durante la charla**
 
 1. Creá la sala y abrí el panel en la computadora que proyecta. **Presentar** lo pone en pantalla
@@ -374,12 +383,18 @@ rojo y otro bueno", que es lo que muestran esos dos años.
    respuestas antes que la sala, y los podios antes de revelarlos.
 3. En el panel también funcionan las flechas ← → y la barra espaciadora (cierra la pregunta).
 4. Después de la última ronda, *Ir a los rankings*: cada categoría arranca con 3, 2, 1 y el podio se
-   revela de abajo hacia arriba. Al terminar, cada celular muestra su puesto y su análisis completo.
+   revela de abajo hacia arriba, un puesto cada segundo y medio. Si en esa categoría hay menos de tres
+   participantes, el podio se achica y no se espera por puestos vacíos: con uno solo, el ganador
+   aparece apenas termina la cuenta. Junto a cada monto se muestra el resultado en porcentaje sobre
+   los $100.000 iniciales. Al terminar, cada celular muestra su puesto y su análisis completo.
 5. **CSV** baja una fila por persona: perfil, cartera, cada respuesta, tiempo, plata final y puestos.
 
-**Ajustes** permite cambiar los segundos por pregunta (25 por defecto; la elección de cartera suma
-15), reiniciar la sala (borra las respuestas, conserva a los anotados y sortea otro mercado) y
-borrarla.
+**Ajustes** abre el cuadro de tiempos: un tiempo general por pregunta (25 segundos por defecto; la
+elección de cartera le suma 15) y, debajo, los diez pasos con un casillero cada uno para darle a
+cualquiera su propio tiempo. El casillero vacío usa el general, y *Usar el general en todos* los
+vacía de una vez. Un tiempo nuevo se aplica cuando el paso se abre, así que se puede cambiar el de
+una ronda mientras corre la anterior. Desde el mismo cuadro se reinicia la sala (borra las
+respuestas, conserva a los anotados y sortea otro mercado) y se la borra.
 
 El consumo es el mismo que el del modo competitivo: los textos y las cuentas viven en `cartera.js`,
 así que por la base solo viajan el paso activo, unas diez respuestas por persona y la tabla final.
